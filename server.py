@@ -443,9 +443,12 @@ class Server:
                 dist = math.hypot(dx, dy)
                 if dist > 3:
                     u["is_moving"] = True
+                    # New code: speed scales dynamically with tile size
+                    tile_pixel_size = 800.0 / self.board_size
+                    base_blocks_per_second = (3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2))
 
-                    base_speed = (3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2)) * 5.0
-                    speed = base_speed * (14.0 / max(8.0, float(u["radius"])))
+                    # Convert blocks-per-frame into pixels-per-frame
+                    speed = base_blocks_per_second * tile_pixel_size * 0.1
 
                     current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                     ahead_x = u["x"] + (dx / dist) * 10.0
