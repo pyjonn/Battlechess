@@ -436,9 +436,8 @@ class Server:
                 if dist > 3:
                     u["is_moving"] = True
 
-                    base_speed = 3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2)
+                    base_speed = (3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2)) * 5.0
                     speed = base_speed * (14.0 / max(8.0, float(u["radius"])))
-
                     current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                     ahead_x = u["x"] + (dx / dist) * 10.0
                     ahead_y = u["y"] + (dy / dist) * 10.0
