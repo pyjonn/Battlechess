@@ -14,6 +14,14 @@ pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 pygame.mixer.set_num_channels(16)
 
+# Load and play background soundtrack on repeat
+try:
+    pygame.mixer.music.load("soundtrack.ogg")
+    pygame.mixer.music.set_volume(0.3)
+    pygame.mixer.music.play(-1)
+except Exception as e:
+    print(f"Could not load soundtrack: {e}")
+
 try:
     BOW_SOUND = pygame.mixer.Sound("bow.wav")
 except Exception:
@@ -23,14 +31,6 @@ try:
     MELEE_SOUND = pygame.mixer.Sound("melee.wav")
 except Exception:
     MELEE_SOUND = None
-
-# Load and loop background soundtrack
-try:
-    pygame.mixer.music.load("soundtrack.ogg")  # Replace with your audio file (.mp3, .wav, or .ogg)
-    pygame.mixer.music.set_volume(0.4)         # Adjust background volume (0.0 to 1.0)
-    pygame.mixer.music.play(-1)                # -1 loops the music indefinitely
-except Exception as e:
-    print(f"Could not load soundtrack: {e}")
 
 try:
     FOOTSTEP_SOUNDS = [pygame.mixer.Sound("step1.wav"), pygame.mixer.Sound("step2.wav")]
@@ -144,23 +144,34 @@ class ClientApp:
             dt = clock.tick(60) / 1000.0
             self.anim_tick += 1
 
-            # Handle continuous keyboard panning (WASD) - Reversed directions
+            # Handle continuous keyboard panning (WASD) - Relative to screen direction
             if self.state == "CONNECTED" and self.game_state in ("SHOP", "IN_GAME"):
                 keys = pygame.key.get_pressed()
                 pan_speed = 400.0 * dt / self.zoom
-
-                # Dynamically calculate the maximum camera limit based on the current zoom.
-                # If the entire map is visible, max_cam evaluates to 0.0, completely locking panning.
                 max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
 
-                if keys[pygame.K_w] or keys[pygame.K_UP]:
-                    self.camera_y = min(max_cam, self.camera_y + pan_speed) # Reversed from - to +
-                if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-                    self.camera_y = max(0.0, self.camera_y - pan_speed) # Reversed from + to -
-                if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                    self.camera_x = min(max_cam, self.camera_x + pan_speed) # Reversed from - to +
-                if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                    self.camera_x = max(0.0, self.camera_x - pan_speed) # Reversed from + to -
+                # Pressing W pans screen UP (map moves DOWN)
+                # Pressing S pans screen DOWN (map moves UP)
+                # Pressing A pans screen LEFT (map moves RIGHT)
+                # Pressing D pans screen RIGHT (map moves LEFT)
+                if self.player_id == 0:
+                    if keys[pygame.K_w] or keys[pygame.K_UP]:
+                        self.camera_y = min(max_cam, self.camera_y + pan_speed)
+                    if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                        self.camera_y = max(0.0, self.camera_y - pan_speed)
+                    if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                        self.camera_x = min(max_cam, self.camera_x + pan_speed)
+                    if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                        self.camera_x = max(0.0, self.camera_x - pan_speed)
+                else:
+                    if keys[pygame.K_w] or keys[pygame.K_UP]:
+                        self.camera_y = max(0.0, self.camera_y - pan_speed)
+                    if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                        self.camera_y = min(max_cam, self.camera_y + pan_speed)
+                    if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                        self.camera_x = max(0.0, self.camera_x - pan_speed)
+                    if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                        self.camera_x = min(max_cam, self.camera_x + pan_speed)
 
             events = pygame.event.get()
             for event in events:
@@ -378,7 +389,7 @@ class ClientApp:
         self.handle_common_board_events(event)
         if event.type == pygame.MOUSEBUTTONDOWN:
             smx, smy = event.pos
-            if smy > 40: # Board area
+            if smy > 40:
                 wmx, wmy = self.to_world_coords(smx, smy)
                 if event.button == 1:
                     self.drag_start = (smx, smy)
@@ -386,7 +397,6 @@ class ClientApp:
                         self.selected_units.clear()
                     for u in self.units:
                         if u["owner"] == self.player_id:
-                            # Calculate unit world radius
                             u_blocks = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
                             u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                             if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
@@ -436,13 +446,9 @@ class ClientApp:
             self.zoom_at(pygame.mouse.get_pos(), target_zoom)
 
     def zoom_at(self, mouse_pos, new_zoom):
-        # Get world coordinates under the mouse before zooming
         wx_before, wy_before = self.to_world_coords(mouse_pos[0], mouse_pos[1])
-
-        # Apply new zoom
         self.zoom = new_zoom
 
-        # Adjust camera so the world point remains under the mouse position
         board_render_size = 500.0
         local_sx = mouse_pos[0] - 150
         local_sy = mouse_pos[1] - 40
@@ -453,15 +459,12 @@ class ClientApp:
         self.camera_x = wx_before - (local_sx / (board_render_size / WORLD_SIZE)) / self.zoom
         self.camera_y = wy_before - (local_sy / (board_render_size / WORLD_SIZE)) / self.zoom
 
-        # Clamp camera to bounds so we can't zoom out further than the entire map viewport or pan past edge
         max_view_span = WORLD_SIZE / self.zoom
         max_cam = max(0.0, WORLD_SIZE - max_view_span)
         self.camera_x = max(0.0, min(max_cam, self.camera_x))
         self.camera_y = max(0.0, min(max_cam, self.camera_y))
 
     def to_screen_coords(self, x, y):
-        # Map world coordinates (0 to 800) to viewport screen coordinates
-        # Offset by board display area top-left (150, 40) and size 500x500
         board_render_size = 500.0
         local_x = (x - self.camera_x) * self.zoom * (board_render_size / WORLD_SIZE)
         local_y = (y - self.camera_y) * self.zoom * (board_render_size / WORLD_SIZE)
@@ -512,7 +515,6 @@ class ClientApp:
         SCREEN.blit(jbt, (WIDTH // 2 - jbt.get_width() // 2, 356))
 
     def draw_board(self):
-        # Clip drawing to the board display viewport (150, 40, 500, 500)
         board_rect = pygame.Rect(150, 40, 500, 500)
         SCREEN.set_clip(board_rect)
 
@@ -534,12 +536,10 @@ class ClientApp:
                     else:
                         color = (max(0, int(base_color[0] + h * 50)), max(0, int(base_color[1] + h * 50)), max(0, int(base_color[2] + h * 50)))
 
-                # Top-left world coordinate of this tile
                 wx = c * tile_size_world
                 wy = r * tile_size_world
                 sx, sy = self.to_screen_coords(wx, wy)
 
-                # Size of tile on screen
                 ts_screen = tile_size_world * self.zoom * (500.0 / WORLD_SIZE)
                 pygame.draw.rect(SCREEN, color, (math.floor(sx), math.floor(sy), math.ceil(ts_screen), math.ceil(ts_screen)))
 
@@ -560,7 +560,6 @@ class ClientApp:
             s_angle = self.to_screen_angle(u["angle"])
             color = PLAYER_COLORS[u["owner"]]
 
-            # Piece size in blocks: 2 blocks wide for pawns, knights, healers, kings; 2.4 blocks wide for queens, rooks.
             block_width = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
             draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
@@ -618,18 +617,32 @@ class ClientApp:
         pygame.draw.rect(SCREEN, (20, 20, 25), (mm_x, mm_y, mm_size, mm_size))
         pygame.draw.rect(SCREEN, (100, 100, 100), (mm_x, mm_y, mm_size, mm_size), 1)
 
-        # Draw units on minimap
-        for u in self.units:
-            ux = mm_x + int((u["x"] / WORLD_SIZE) * mm_size)
-            uy = mm_y + int((u["y"] / WORLD_SIZE) * mm_size)
-            col = PLAYER_COLORS[u["owner"]]
-            pygame.draw.circle(SCREEN, col, (ux, uy), 2)
-
-        # Draw viewport boundary box
         view_w = (WORLD_SIZE / self.zoom) / (WORLD_SIZE / mm_size)
         view_h = (WORLD_SIZE / self.zoom) / (WORLD_SIZE / mm_size)
-        view_x = mm_x + int((self.camera_x / WORLD_SIZE) * mm_size)
-        view_y = mm_y + int((self.camera_y / WORLD_SIZE) * mm_size)
+
+        if self.player_id == 0:
+            # Flipped orientation matching Player 1 screen perspective
+            for u in self.units:
+                ux = mm_x + mm_size - int((u["x"] / WORLD_SIZE) * mm_size)
+                uy = mm_y + mm_size - int((u["y"] / WORLD_SIZE) * mm_size)
+                col = PLAYER_COLORS[u["owner"]]
+                pygame.draw.circle(SCREEN, col, (ux, uy), 2)
+
+            view_span = WORLD_SIZE / self.zoom
+            view_x = mm_x + int(((WORLD_SIZE - self.camera_x - view_span) / WORLD_SIZE) * mm_size)
+            view_y = mm_y + int(((WORLD_SIZE - self.camera_y - view_span) / WORLD_SIZE) * mm_size)
+        else:
+            # Standard orientation for Player 2
+            for u in self.units:
+                ux = mm_x + int((u["x"] / WORLD_SIZE) * mm_size)
+                uy = mm_y + int((u["y"] / WORLD_SIZE) * mm_size)
+                col = PLAYER_COLORS[u["owner"]]
+                pygame.draw.circle(SCREEN, col, (ux, uy), 2)
+
+            view_x = mm_x + int((self.camera_x / WORLD_SIZE) * mm_size)
+            view_y = mm_y + int((self.camera_y / WORLD_SIZE) * mm_size)
+
+        # Draw viewport boundary box
         pygame.draw.rect(SCREEN, (255, 255, 255), (view_x, view_y, view_w, view_h), 1)
 
     def draw_lobby(self):
