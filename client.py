@@ -147,17 +147,18 @@ class ClientApp:
             self.anim_tick += 1
 
             # Handle continuous keyboard panning (WASD) during game/shop
+            # Handle continuous keyboard panning (WASD) - Reversed directions
             if self.state == "CONNECTED" and self.game_state in ("SHOP", "IN_GAME"):
                 keys = pygame.key.get_pressed()
                 pan_speed = 400.0 * dt / self.zoom
                 if keys[pygame.K_w] or keys[pygame.K_UP]:
-                    self.camera_y = max(0.0, self.camera_y - pan_speed)
+                    self.camera_y = min(WORLD_SIZE - (500.0 / self.zoom), self.camera_y + pan_speed) # Reversed from - to +
                 if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-                    self.camera_y = min(WORLD_SIZE - (500.0 / self.zoom), self.camera_y + pan_speed)
+                    self.camera_y = max(0.0, self.camera_y - pan_speed) # Reversed from + to -
                 if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                    self.camera_x = max(0.0, self.camera_x - pan_speed)
+                    self.camera_x = min(WORLD_SIZE - (500.0 / self.zoom), self.camera_x + pan_speed) # Reversed from - to +
                 if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                    self.camera_x = min(WORLD_SIZE - (500.0 / self.zoom), self.camera_x + pan_speed)
+                    self.camera_x = max(0.0, self.camera_x - pan_speed) # Reversed from + to -
 
             events = pygame.event.get()
             for event in events:
@@ -422,17 +423,39 @@ class ClientApp:
             if event.key == pygame.K_m:
                 self.show_minimap = not self.show_minimap
             elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                self.zoom = min(4.0, self.zoom * 1.25)
+                # Zoom in relative to screen center or mouse
+                self.zoom_at(pygame.mouse.get_pos(), min(4.0, self.zoom * 1.25))
             elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
                 min_zoom = 500.0 / WORLD_SIZE
-                self.zoom = max(min_zoom, self.zoom / 1.25)
+                self.zoom_at(pygame.mouse.get_pos(), max(min_zoom, self.zoom / 1.25))
         elif event.type == pygame.MOUSEWHEEL:
-            # Zoom in/out via scroll wheel centered around screen or board
-            if event.y > 0:
-                self.zoom = min(4.0, self.zoom * 1.15)
-            else:
-                min_zoom = 500.0 / WORLD_SIZE
-                self.zoom = max(min_zoom, self.zoom / 1.15)
+            min_zoom = 500.0 / WORLD_SIZE
+            target_zoom = self.zoom * 1.15 if event.y > 0 else self.zoom / 1.15
+            target_zoom = max(min_zoom, min(4.0, target_zoom))
+            self.zoom_at(pygame.mouse.get_pos(), target_zoom)
+
+    def zoom_at(self, mouse_pos, new_zoom):
+        # Get world coordinates under the mouse before zooming
+        wx_before, wy_before = self.to_world_coords(mouse_pos[0], mouse_pos[1])
+
+        # Apply new zoom
+        self.zoom = new_zoom
+
+        # Adjust camera so the world point remains under the mouse position
+        board_render_size = 500.0
+        local_sx = mouse_pos[0] - 150
+        local_sy = mouse_pos[1] - 40
+        if self.player_id == 0:
+            local_sx = board_render_size - local_sx
+            local_sy = board_render_size - local_sy
+
+        self.camera_x = wx_before - (local_sx / (board_render_size / WORLD_SIZE)) / self.zoom
+        self.camera_y = wy_before - (local_sy / (board_render_size / WORLD_SIZE)) / self.zoom
+
+        # Clamp camera to bounds so we can't zoom out further than the entire map viewport
+        max_view_span = 500.0 / self.zoom
+        self.camera_x = max(0.0, min(WORLD_SIZE - max_view_span, self.camera_x))
+        self.camera_y = max(0.0, min(WORLD_SIZE - max_view_span, self.camera_y))
 
     def to_screen_coords(self, x, y):
         # Map world coordinates (0 to 800) to viewport screen coordinates
