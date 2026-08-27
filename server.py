@@ -82,49 +82,38 @@ def generate_heightmap(size, water_enabled, units=None):
             grid[r][c] = round(elevation, 2)
 
     # Force land around starting King positions and existing unit positions
+    # Ensure random generation provides land at the starting positions
     if units is not None:
         protected_positions = [(u["x"], u["y"]) for u in units]
     else:
-        # Default starting King spawn positions for Player 0 and Player 1
+        # Top-middle and bottom-middle starting positions
         protected_positions = [(400, 120), (400, 680)]
 
     for wx, wy in protected_positions:
-            center_c = int(wx / tile_pixel_size)
-            center_r = int(wy / tile_pixel_size)
+        center_c = int(wx / tile_pixel_size)
+        center_r = int(wy / tile_pixel_size)
 
-            # Create a smooth, circular island rather than a hard square
-            # Force a valley around starting King positions and existing unit positions
-            if units is not None:
-                protected_positions = [(u["x"], u["y"]) for u in units]
-            else:
-                # Default starting King spawn positions for Player 0 and Player 1
-                protected_positions = [(400, 120), (400, 680)]
+        # Wide radius for an unnoticeable transition
+        island_radius = 12.0
+        target_land_height = 0.2  # Safely above the -0.1 water level
 
-            for wx, wy in protected_positions:
-                center_c = int(wx / tile_pixel_size)
-                center_r = int(wy / tile_pixel_size)
+        for r in range(max(0, int(center_r - island_radius)), min(size, int(center_r + island_radius + 1))):
+            for c in range(max(0, int(center_c - island_radius)), min(size, int(center_c + island_radius + 1))):
+                dist = math.hypot(c - center_c, r - center_r)
 
-                # Create a natural valley with raised edges
-                valley_radius = 8.0
-                for r in range(max(0, int(center_r - valley_radius)), min(size, int(center_r + valley_radius + 1))):
-                    for c in range(max(0, int(center_c - valley_radius)), min(size, int(center_c + valley_radius + 1))):
-                        dist = math.hypot(c - center_c, r - center_r)
+                if dist <= island_radius:
+                    blend = dist / island_radius
+                    smooth = blend * blend * (3 - 2 * blend)
 
-                        if dist <= valley_radius:
-                            # Normalize distance from 0 (center) to 1 (edge)
-                            blend = dist / valley_radius
+                    original_h = grid[r][c]
 
-                            # Smoothstep curve for natural terrain blending
-                            smooth = blend * blend * (3 - 2 * blend)
+                    # Only modify the terrain if it generated underwater or too low
+                    if original_h < target_land_height:
+                        # Blend the low terrain up to the target land height at the center
+                        boosted_h = (target_land_height * (1.0 - smooth)) + (original_h * smooth)
 
-                            # Set center floor to 0.0 (safely above the default -0.1 water level)
-                            valley_floor = 0.0
-
-                            # Elevate the edges using the existing noise to form a mountainous rim
-                            mountain_rim = grid[r][c] + 0.6
-
-                            # Blend the low center outward into the raised rim
-                            grid[r][c] = (mountain_rim * smooth) + (valley_floor * (1.0 - smooth))
+                        # Use max() to ensure we never accidentally flatten existing mountains
+                        grid[r][c] = max(original_h, boosted_h)
     return grid
 
 def get_height_at_pos(wx, wy, heightmap, board_size):
