@@ -24,6 +24,14 @@ try:
 except Exception:
     MELEE_SOUND = None
 
+# Load and loop background soundtrack
+try:
+    pygame.mixer.music.load("soundtrack.ogg")  # Replace with your audio file (.mp3, .wav, or .ogg)
+    pygame.mixer.music.set_volume(0.4)         # Adjust background volume (0.0 to 1.0)
+    pygame.mixer.music.play(-1)                # -1 loops the music indefinitely
+except Exception as e:
+    print(f"Could not load soundtrack: {e}")
+
 try:
     FOOTSTEP_SOUNDS = [pygame.mixer.Sound("step1.wav"), pygame.mixer.Sound("step2.wav")]
 except Exception:
