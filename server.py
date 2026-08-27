@@ -21,39 +21,82 @@ def setup_logging(verbose):
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # Terminal output handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
     console_handler.setFormatter(logging.Formatter(log_format))
     logger.addHandler(console_handler)
 
-    # File output handler
     file_handler = logging.FileHandler("server.log")
     file_handler.setLevel(log_level)
     file_handler.setFormatter(logging.Formatter(log_format))
     logger.addHandler(file_handler)
 
-def generate_heightmap(size, water_enabled):
-    logging.debug(f"Generating heightmap for board size {size} with water_enabled={water_enabled}")
+def generate_noise_grid(grid_w, grid_h):
+    return [[random.uniform(-1.0, 1.0) for _ in range(grid_h + 1)] for _ in range(grid_w + 1)]
+
+def sample_smooth_noise(grid, x, y):
+    gx, gy = int(x), int(y)
+    fx, fy = x - gx, y - gy
+
+    # Smooth Interpolation (fade curve)
+    fade = lambda t: t * t * (3 - 2 * t)
+    sx, sy = fade(fx), fade(fy)
+
+    v00 = grid[gx][gy]
+    v10 = grid[gx + 1][gy]
+    v01 = grid[gx][gy + 1]
+    v11 = grid[gx + 1][gy + 1]
+
+    top = v00 + sx * (v10 - v00)
+    bottom = v01 + sx * (v11 - v01)
+    return top + sy * (bottom - top)
+
+def generate_heightmap(size, water_enabled, units=None):
+    logging.debug(f"Generating randomized heightmap for size {size}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
+
+    # Generate random gradient grids for multiple octaves
+    octave1 = generate_noise_grid(4, 4)
+    octave2 = generate_noise_grid(8, 8)
+    octave3 = generate_noise_grid(16, 16)
+
     cx, cy = size / 2.0, size / 2.0
+    tile_pixel_size = 800.0 / size
 
     for r in range(size):
         for c in range(size):
             nx, ny = c / float(size), r / float(size)
 
-            # Ground ranges strictly above 0.0
-            h = abs(math.sin(nx * 3.14 * 4) * math.cos(ny * 3.14 * 4) * 2.0) + 0.1
+            # Combine octaves for natural terrain fractal noise
+            val1 = sample_smooth_noise(octave1, nx * 4, ny * 4) * 1.0
+            val2 = sample_smooth_noise(octave2, nx * 8, ny * 8) * 0.5
+            val3 = sample_smooth_noise(octave3, nx * 16, ny * 16) * 0.25
+
+            elevation = val1 + val2 + val3
 
             if water_enabled:
-                dist_from_center = math.hypot(c - cx, r - cy)
-                lake_radius = size * 0.18
-                if dist_from_center < lake_radius:
-                    depth_factor = (1.0 - (dist_from_center / lake_radius)) ** 2
-                    # Water ranges below 0.0
-                    h = -0.5 - (depth_factor * 1.5)
+                # Add slight center valley bias for dynamic water pools
+                dist_center = math.hypot(c - cx, r - cy) / (size * 0.5)
+                elevation -= max(0.0, 0.4 - dist_center * 0.3)
 
-            grid[r][c] = round(h, 2)
+            grid[r][c] = round(elevation, 2)
+
+    # Force land around starting King positions and existing unit positions
+    if units is not None:
+        protected_positions = [(u["x"], u["y"]) for u in units]
+    else:
+        # Default starting King spawn positions for Player 0 and Player 1
+        protected_positions = [(400, 120), (400, 680)]
+
+    for wx, wy in protected_positions:
+        center_c = int(wx / tile_pixel_size)
+        center_r = int(wy / tile_pixel_size)
+
+        # Ensure a 2-tile radius around each unit is raised above the water line
+        for r in range(max(0, center_r - 2), min(size, center_r + 3)):
+            for c in range(max(0, center_c - 2), min(size, center_c + 3)):
+                grid[r][c] = max(grid[r][c], 0.5)
+
     return grid
 
 def get_height_at_pos(wx, wy, heightmap, board_size):
@@ -102,16 +145,16 @@ class Server:
         self.fog_enabled = False
         self.water_rising_enabled = False
         self.water_enabled = True
-        self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
-        # Inside Server.__init__
-        self.water_level = 0.0  # Set water threshold to 0.0
 
+        # Initialize units list before generate_heightmap is called
+        self.units = []
+        self.projectiles = []
 
+        self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
+        self.water_level = -0.1
 
         self.starting_gold = 2000
         self.state = "LOBBY"
-        self.units = []
-        self.projectiles = []
         self.gold = {0: self.starting_gold, 1: self.starting_gold}
         self.ready = {0: False, 1: False}
         self.next_unit_id = 1
@@ -193,7 +236,8 @@ class Server:
             self.broadcast({"type": "CHAT", "sender": sender_name, "text": msg["text"]})
 
         elif mtype == "SET_BOARD_SIZE" and pid == 0 and self.state == "LOBBY":
-            self.board_size = msg["size"]
+            # Higher max board size limit raised to 128
+            self.board_size = max(12, min(128, msg["size"]))
             logging.info(f"Host updated board size to {self.board_size}")
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
             self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
@@ -226,9 +270,9 @@ class Server:
             })
 
         elif mtype == "START_GAME" and pid == 0 and self.state == "LOBBY":
-            logging.info("Host started the game. Entering SHOP phase.")
+            logging.info("Host started the game. Generating fresh terrain & entering SHOP phase.")
             self.state = "SHOP"
-            self.water_level = 0.0 if self.water_enabled else -99.0
+            self.water_level = -0.1 if self.water_enabled else -99.0
             self.units = []
 
             tile_pixel_size = 800.0 / self.board_size
@@ -258,6 +302,9 @@ class Server:
                     "vy": 0.0
                 })
                 self.next_unit_id += 1
+
+            # Generate heightmap after spawn locations exist
+            self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
 
             self.gold = {0: self.starting_gold, 1: self.starting_gold}
             self.ready = {0: False, 1: False}
@@ -349,7 +396,6 @@ class Server:
             u_ids = msg.get("unit_ids", [])
             tx, ty = msg["target_pos"]
             t_unit = msg.get("target_unit")
-            logging.debug(f"Player {pid} issued command to units {u_ids} targeting position ({tx}, {ty})")
 
             selected_group = [u for u in self.units if u["owner"] == pid and u["id"] in u_ids]
 
@@ -372,6 +418,7 @@ class Server:
                         u["target_x"] = tx + offset_x
                         u["target_y"] = ty + offset_y
                         u["target_unit"] = None
+
     def game_loop(self):
         has_had_clients = False
         while True:
@@ -410,36 +457,39 @@ class Server:
                         u1["y"] -= ny * (overlap * 0.5)
                         u2["x"] += nx * (overlap * 0.5)
                         u2["y"] += ny * (overlap * 0.5)
-
             for u in self.units:
                 u["is_hit"] = False
 
-                # Corrected code: Units take damage only in water, grass/land is completely safe
-                if self.water_enabled:
-                    h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
-                    if h <= self.water_level:
-                        u["hp"] -= 0.8  # Apply water damage only
-
                 target = None
+
+                # --- HEALER TARGETING ---
                 if u["type"] == "Healer":
+                    # 1. Try to find existing targeted friendly unit
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and e["owner"] == u["owner"]), None)
                         if not target:
                             u["target_unit"] = None
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
+
+                    # 2. If no target, auto-acquire closest injured friendly unit
                     if not target and not u.get("target_unit"):
                         friendlies = [e for e in self.units if e["owner"] == u["owner"] and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
                         if friendlies:
                             friendlies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
                             target = friendlies[0]
+
+                # --- COMBAT UNIT TARGETING ---
                 else:
+                    # 1. Try to find existing targeted enemy unit
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and e["owner"] != u["owner"]), None)
                         if not target:
                             u["target_unit"] = None
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
+
+                    # 2. If no target, auto-acquire closest enemy unit
                     if not target and not u.get("target_unit"):
                         enemies = [e for e in self.units if e["owner"] != u["owner"]]
                         if enemies:
@@ -455,11 +505,8 @@ class Server:
                 dist = math.hypot(dx, dy)
                 if dist > 3:
                     u["is_moving"] = True
-                    # New code: speed scales dynamically with tile size
                     tile_pixel_size = 800.0 / self.board_size
                     base_blocks_per_second = (3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2))
-
-                    # Convert blocks-per-frame into pixels-per-frame
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
                     current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)

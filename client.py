@@ -412,7 +412,8 @@ class ClientApp:
             elif event.key == pygame.K_BACKSPACE:
                 self.chat_input = self.chat_input[:-1]
             elif event.key == pygame.K_UP and self.player_id == 0:
-                self.send({"type": "SET_BOARD_SIZE", "size": min(48, self.board_size + 2)})
+                # Max board size updated to 128
+                self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
             elif event.key == pygame.K_DOWN and self.player_id == 0:
                 self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
             elif event.key == pygame.K_RIGHT and self.player_id == 0:
