@@ -285,6 +285,10 @@ class ClientApp:
             g = msg["gold"]
             self.gold = g.get(str(self.player_id), g.get(self.player_id, self.starting_gold))
             self.ready_map = {int(k): v for k, v in msg["ready"].items()}
+
+            # Apply the updated terrain to the client board
+            if "heightmap" in msg:
+                self.heightmap = msg["heightmap"]
         elif mtype == "GAME_START":
             self.units = msg["units"]
             self.projectiles = []

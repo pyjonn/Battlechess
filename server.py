@@ -89,14 +89,42 @@ def generate_heightmap(size, water_enabled, units=None):
         protected_positions = [(400, 120), (400, 680)]
 
     for wx, wy in protected_positions:
-        center_c = int(wx / tile_pixel_size)
-        center_r = int(wy / tile_pixel_size)
+            center_c = int(wx / tile_pixel_size)
+            center_r = int(wy / tile_pixel_size)
 
-        # Ensure a 2-tile radius around each unit is raised above the water line
-        for r in range(max(0, center_r - 2), min(size, center_r + 3)):
-            for c in range(max(0, center_c - 2), min(size, center_c + 3)):
-                grid[r][c] = max(grid[r][c], 0.5)
+            # Create a smooth, circular island rather than a hard square
+            # Force a valley around starting King positions and existing unit positions
+            if units is not None:
+                protected_positions = [(u["x"], u["y"]) for u in units]
+            else:
+                # Default starting King spawn positions for Player 0 and Player 1
+                protected_positions = [(400, 120), (400, 680)]
 
+            for wx, wy in protected_positions:
+                center_c = int(wx / tile_pixel_size)
+                center_r = int(wy / tile_pixel_size)
+
+                # Create a natural valley with raised edges
+                valley_radius = 8.0
+                for r in range(max(0, int(center_r - valley_radius)), min(size, int(center_r + valley_radius + 1))):
+                    for c in range(max(0, int(center_c - valley_radius)), min(size, int(center_c + valley_radius + 1))):
+                        dist = math.hypot(c - center_c, r - center_r)
+
+                        if dist <= valley_radius:
+                            # Normalize distance from 0 (center) to 1 (edge)
+                            blend = dist / valley_radius
+
+                            # Smoothstep curve for natural terrain blending
+                            smooth = blend * blend * (3 - 2 * blend)
+
+                            # Set center floor to 0.0 (safely above the default -0.1 water level)
+                            valley_floor = 0.0
+
+                            # Elevate the edges using the existing noise to form a mountainous rim
+                            mountain_rim = grid[r][c] + 0.6
+
+                            # Blend the low center outward into the raised rim
+                            grid[r][c] = (mountain_rim * smooth) + (valley_floor * (1.0 - smooth))
     return grid
 
 def get_height_at_pos(wx, wy, heightmap, board_size):
@@ -330,10 +358,35 @@ class Server:
                 row_idx = len(player_units) // 6
                 col_idx = len(player_units) % 6
 
+                # Calculate the ideal grid position
                 base_y = 160 if pid == 0 else 640
-                spawn_x = 200 + (col_idx * 45)
-                spawn_y = base_y + (row_idx * 25 * (1 if pid == 0 else -1))
+                intended_x = 200 + (col_idx * 45)
+                intended_y = base_y + (row_idx * 25 * (1 if pid == 0 else -1))
 
+                # Search outward in a circle to find the nearest valid land
+                spawn_x, spawn_y = intended_x, intended_y
+                search_radius = 0
+
+                while search_radius < 400:
+                    # Increase the number of check points as the circle gets larger
+                    steps = max(1, int(search_radius / 8))
+                    found_land = False
+
+                    for i in range(steps):
+                        angle = (i / steps) * math.pi * 2
+                        # Clamp coordinates to keep units on the board
+                        cx = max(10, min(790, intended_x + math.cos(angle) * search_radius))
+                        cy = max(10, min(790, intended_y + math.sin(angle) * search_radius))
+
+                        # Verify the elevation is above the water level
+                        if get_height_at_pos(cx, cy, self.heightmap, self.board_size) > self.water_level:
+                            spawn_x, spawn_y = cx, cy
+                            found_land = True
+                            break
+
+                    if found_land:
+                        break
+                    search_radius += 15
                 tile_pixel_size = 800.0 / self.board_size
                 four_block_radius = int(2.0 * tile_pixel_size) / 2
 
@@ -375,6 +428,14 @@ class Server:
                     "vy": 0.0
                 })
                 self.next_unit_id += 1
+
+                self.broadcast({
+                    "type": "SHOP_UPDATE",
+                    "units": self.units,
+                    "gold": self.gold,
+                    "ready": self.ready,
+                    "heightmap": self.heightmap
+                })
                 self.broadcast({"type": "SHOP_UPDATE", "units": self.units, "gold": self.gold, "ready": self.ready})
 
         elif mtype == "READY_SHOP" and self.state == "SHOP":
