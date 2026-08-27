@@ -564,15 +564,15 @@ class ClientApp:
 
                 base_color = (105, 185, 85)
                 color = base_color
-
+                # Updated color logic: Crisp green land and blue water
                 if self.heightmap and map_r < len(self.heightmap) and map_c < len(self.heightmap[map_r]):
                     h = self.heightmap[map_r][map_c]
                     if h <= self.water_level:
-                        color = (40, 120, 220)
-                    elif h > 0:
-                        color = (min(255, int(base_color[0] + h * 110)), min(255, int(base_color[1] + h * 70)), max(0, int(base_color[2] - h * 80)))
+                        color = (40, 120, 220)  # Blue water
                     else:
-                        color = (max(0, int(base_color[0] + h * 50)), max(0, int(base_color[1] + h * 50)), max(0, int(base_color[2] + h * 50)))
+                        # Subtle shade variation that stays pure green (no red/yellow added)
+                        green_val = max(120, min(220, int(160 + h * 30)))
+                        color = (40, green_val, 50)  # Green land
 
                 wx = c * tile_size_world
                 wy = r * tile_size_world
