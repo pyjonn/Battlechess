@@ -213,7 +213,8 @@ class Server:
             self.units = []
 
             tile_pixel_size = 800.0 / self.board_size
-            four_block_radius = int(2.0 * tile_pixel_size)
+            # Halved the original four_block_radius size
+            four_block_radius = int(2.0 * tile_pixel_size) / 2
             for p in [0, 1]:
                 king_x = 400
                 king_y = 120 if p == 0 else 680
@@ -234,7 +235,7 @@ class Server:
                     "last_attack": 0,
                     "target_unit": None,
                     "draw_radius": int(tile_pixel_size * 1.5),
-                    "radius": four_block_radius,
+                    "radius": four_block_radius, # Updated collision radius
                     "vx": 0.0,
                     "vy": 0.0
                 })
@@ -269,7 +270,8 @@ class Server:
                 spawn_y = base_y + (row_idx * 25 * (1 if pid == 0 else -1))
 
                 tile_pixel_size = 800.0 / self.board_size
-                four_block_radius = int(2.0 * tile_pixel_size)
+                # Halved the original four_block_radius size
+                four_block_radius = int(2.0 * tile_pixel_size) / 2
 
                 shapes = {
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
@@ -438,6 +440,7 @@ class Server:
 
                     base_speed = (3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2)) * 5.0
                     speed = base_speed * (14.0 / max(8.0, float(u["radius"])))
+
                     current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                     ahead_x = u["x"] + (dx / dist) * 10.0
                     ahead_y = u["y"] + (dy / dist) * 10.0
