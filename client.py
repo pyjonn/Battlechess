@@ -119,19 +119,9 @@ class ClientApp:
         self.show_minimap = True
 
     def update_default_zoom(self):
-        # Calculate board render size at zoom=1.0. The viewport area is HEIGHT - top offset (e.g. 500 px available)
-        available_size = 500.0
-        # If board size in pixels at zoom 1 is larger than available screen space, set default zoom to fit it
-        required_zoom = available_size / (self.board_size * (WORLD_SIZE / self.board_size)) # which simplifies, but let's make it fit nicely
-        # Actually, let's determine zoom so that the full 800x800 world fits into the available screen area if it's large
-        max_screen_dim = 500.0
-        if WORLD_SIZE > max_screen_dim:
-            self.zoom = max_screen_dim / WORLD_SIZE
-        else:
-            self.zoom = 1.0
-        # Center camera
-        self.camera_x = (WORLD_SIZE - (max_screen_dim / self.zoom)) / 2.0 if self.zoom < 1.0 else 0.0
-        self.camera_y = (WORLD_SIZE - (max_screen_dim / self.zoom)) / 2.0 if self.zoom < 1.0 else 0.0
+        self.zoom = 1.0
+        self.camera_x = 0.0
+        self.camera_y = 0.0
 
     def get_elevation(self, wx, wy):
         if not self.heightmap:
@@ -146,17 +136,21 @@ class ClientApp:
             dt = clock.tick(60) / 1000.0
             self.anim_tick += 1
 
-            # Handle continuous keyboard panning (WASD) during game/shop
             # Handle continuous keyboard panning (WASD) - Reversed directions
             if self.state == "CONNECTED" and self.game_state in ("SHOP", "IN_GAME"):
                 keys = pygame.key.get_pressed()
                 pan_speed = 400.0 * dt / self.zoom
+
+                # Dynamically calculate the maximum camera limit based on the current zoom.
+                # If the entire map is visible, max_cam evaluates to 0.0, completely locking panning.
+                max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
+
                 if keys[pygame.K_w] or keys[pygame.K_UP]:
-                    self.camera_y = min(WORLD_SIZE - (500.0 / self.zoom), self.camera_y + pan_speed) # Reversed from - to +
+                    self.camera_y = min(max_cam, self.camera_y + pan_speed) # Reversed from - to +
                 if keys[pygame.K_s] or keys[pygame.K_DOWN]:
                     self.camera_y = max(0.0, self.camera_y - pan_speed) # Reversed from + to -
                 if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                    self.camera_x = min(WORLD_SIZE - (500.0 / self.zoom), self.camera_x + pan_speed) # Reversed from - to +
+                    self.camera_x = min(max_cam, self.camera_x + pan_speed) # Reversed from - to +
                 if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
                     self.camera_x = max(0.0, self.camera_x - pan_speed) # Reversed from + to -
 
@@ -423,13 +417,12 @@ class ClientApp:
             if event.key == pygame.K_m:
                 self.show_minimap = not self.show_minimap
             elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                # Zoom in relative to screen center or mouse
                 self.zoom_at(pygame.mouse.get_pos(), min(4.0, self.zoom * 1.25))
             elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                min_zoom = 500.0 / WORLD_SIZE
+                min_zoom = 1.0
                 self.zoom_at(pygame.mouse.get_pos(), max(min_zoom, self.zoom / 1.25))
         elif event.type == pygame.MOUSEWHEEL:
-            min_zoom = 500.0 / WORLD_SIZE
+            min_zoom = 1.0
             target_zoom = self.zoom * 1.15 if event.y > 0 else self.zoom / 1.15
             target_zoom = max(min_zoom, min(4.0, target_zoom))
             self.zoom_at(pygame.mouse.get_pos(), target_zoom)
@@ -452,10 +445,11 @@ class ClientApp:
         self.camera_x = wx_before - (local_sx / (board_render_size / WORLD_SIZE)) / self.zoom
         self.camera_y = wy_before - (local_sy / (board_render_size / WORLD_SIZE)) / self.zoom
 
-        # Clamp camera to bounds so we can't zoom out further than the entire map viewport
-        max_view_span = 500.0 / self.zoom
-        self.camera_x = max(0.0, min(WORLD_SIZE - max_view_span, self.camera_x))
-        self.camera_y = max(0.0, min(WORLD_SIZE - max_view_span, self.camera_y))
+        # Clamp camera to bounds so we can't zoom out further than the entire map viewport or pan past edge
+        max_view_span = WORLD_SIZE / self.zoom
+        max_cam = max(0.0, WORLD_SIZE - max_view_span)
+        self.camera_x = max(0.0, min(max_cam, self.camera_x))
+        self.camera_y = max(0.0, min(max_cam, self.camera_y))
 
     def to_screen_coords(self, x, y):
         # Map world coordinates (0 to 800) to viewport screen coordinates
@@ -624,8 +618,8 @@ class ClientApp:
             pygame.draw.circle(SCREEN, col, (ux, uy), 2)
 
         # Draw viewport boundary box
-        view_w = (500.0 / self.zoom) / (WORLD_SIZE / mm_size)
-        view_h = (500.0 / self.zoom) / (WORLD_SIZE / mm_size)
+        view_w = (WORLD_SIZE / self.zoom) / (WORLD_SIZE / mm_size)
+        view_h = (WORLD_SIZE / self.zoom) / (WORLD_SIZE / mm_size)
         view_x = mm_x + int((self.camera_x / WORLD_SIZE) * mm_size)
         view_y = mm_y + int((self.camera_y / WORLD_SIZE) * mm_size)
         pygame.draw.rect(SCREEN, (255, 255, 255), (view_x, view_y, view_w, view_h), 1)
