@@ -87,6 +87,7 @@ class Server:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((HOST, PORT))
         self.sock.listen(2)
+        self.usernames = {0: "Player 1", 1: "Player 2"}
 
         self.clients = {}
         self.scores = {0: 0, 1: 0}
@@ -169,9 +170,17 @@ class Server:
         mtype = msg.get("type")
         logging.debug(f"Processing message type '{mtype}' from Player {pid}")
 
-        if mtype == "CHAT":
-            logging.info(f"Chat from Player {pid + 1}: {msg['text']}")
-            self.broadcast({"type": "CHAT", "sender": f"Player {pid + 1}", "text": msg["text"]})
+        if mtype == "SET_NAME":
+            name = msg.get("username", f"Player {pid + 1}").strip()
+            if name:
+                self.usernames[pid] = name
+                logging.info(f"Player {pid} set username to '{name}'")
+                self.broadcast({"type": "CHAT", "sender": "System", "text": f"{name} joined the game!"})
+
+        elif mtype == "CHAT":
+            sender_name = self.usernames.get(pid, f"Player {pid + 1}")
+            logging.info(f"Chat from {sender_name}: {msg['text']}")
+            self.broadcast({"type": "CHAT", "sender": sender_name, "text": msg["text"]})
 
         elif mtype == "SET_BOARD_SIZE" and pid == 0 and self.state == "LOBBY":
             self.board_size = msg["size"]
@@ -213,7 +222,6 @@ class Server:
             self.units = []
 
             tile_pixel_size = 800.0 / self.board_size
-            # Halved the original four_block_radius size
             four_block_radius = int(2.0 * tile_pixel_size) / 2
             for p in [0, 1]:
                 king_x = 400
@@ -235,7 +243,7 @@ class Server:
                     "last_attack": 0,
                     "target_unit": None,
                     "draw_radius": int(tile_pixel_size * 1.5),
-                    "radius": four_block_radius, # Updated collision radius
+                    "radius": four_block_radius,
                     "vx": 0.0,
                     "vy": 0.0
                 })
@@ -270,7 +278,6 @@ class Server:
                 spawn_y = base_y + (row_idx * 25 * (1 if pid == 0 else -1))
 
                 tile_pixel_size = 800.0 / self.board_size
-                # Halved the original four_block_radius size
                 four_block_radius = int(2.0 * tile_pixel_size) / 2
 
                 shapes = {
@@ -355,7 +362,6 @@ class Server:
                         u["target_x"] = tx + offset_x
                         u["target_y"] = ty + offset_y
                         u["target_unit"] = None
-
     def game_loop(self):
         has_had_clients = False
         while True:

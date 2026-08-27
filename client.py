@@ -96,7 +96,8 @@ class ClientApp:
         self.state = "MENU"
         self.server_process = None
         self.sock = None
-
+        self.username = "Player"
+        self.active_field = "username"  # 'username' or 'ip'
         self.ip_input = "127.0.0.1"
         self.player_id = None
         self.scores = {0: 0, 1: 0}
@@ -216,9 +217,9 @@ class ClientApp:
             self.sock.connect((ip, 5555))
             threading.Thread(target=self.network_thread, daemon=True).start()
             self.state = "CONNECTED"
+            self.send({"type": "SET_NAME", "username": self.username})
         except Exception as e:
             self.chat_messages.append(f"Connection failed: {e}")
-
     def network_thread(self):
         buffer = ""
         while True:
@@ -334,20 +335,74 @@ class ClientApp:
     def handle_menu_events(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             mx, my = event.pos
-            if pygame.Rect(WIDTH // 2 - 100, 220, 200, 45).collidepoint(mx, my):
+            if pygame.Rect(WIDTH // 2 - 100, 210, 200, 40).collidepoint(mx, my):
                 try:
                     self.server_process = subprocess.Popen([sys.executable, "server.py"])
                     time.sleep(0.8)
                     self.connect_to_server("127.0.0.1")
                 except Exception as e:
                     self.chat_messages.append(f"Server start failed: {e}")
-            elif pygame.Rect(WIDTH // 2 - 100, 345, 200, 40).collidepoint(mx, my):
+            elif pygame.Rect(WIDTH // 2 - 100, 265, 200, 35).collidepoint(mx, my):
+                self.active_field = "username"
+            elif pygame.Rect(WIDTH // 2 - 100, 310, 200, 35).collidepoint(mx, my):
+                self.active_field = "ip"
+            elif pygame.Rect(WIDTH // 2 - 100, 355, 200, 40).collidepoint(mx, my):
                 self.connect_to_server(self.ip_input)
+
         elif event.type == pygame.KEYDOWN:
+            target_str = self.username if self.active_field == "username" else self.ip_input
             if event.key == pygame.K_BACKSPACE:
-                self.ip_input = self.ip_input[:-1]
-            elif event.unicode.isprintable() and len(self.ip_input) < 25:
-                self.ip_input += event.unicode
+                target_str = target_str[:-1]
+            elif event.key == pygame.K_TAB:
+                self.active_field = "ip" if self.active_field == "username" else "username"
+            elif event.unicode.isprintable() and len(target_str) < 20:
+                target_str += event.unicode
+
+            if self.active_field == "username":
+                self.username = target_str
+            else:
+                self.ip_input = target_str
+
+    def draw_menu(self):
+        SCREEN.fill((25, 25, 30))
+        mx, my = pygame.mouse.get_pos()
+
+        t = BIG_FONT.render("Realtime Chess - Main Menu", True, (255, 255, 255))
+        SCREEN.blit(t, (WIDTH // 2 - t.get_width() // 2, 140))
+
+        # Host Game Server Button (with hover highlight)
+        host_rect = pygame.Rect(WIDTH // 2 - 100, 210, 200, 40)
+        host_col = (70, 180, 70) if host_rect.collidepoint(mx, my) else (50, 150, 50)
+        pygame.draw.rect(SCREEN, host_col, host_rect, border_radius=6)
+        ht = FONT.render("Host Game Server", True, (255, 255, 255))
+        SCREEN.blit(ht, (WIDTH // 2 - ht.get_width() // 2, 222))
+
+        # Username Field (with active border highlight)
+        is_user_active = (self.active_field == "username")
+        u_rect = pygame.Rect(WIDTH // 2 - 100, 265, 200, 35)
+        u_col = (80, 120, 220) if is_user_active else (50, 50, 70)
+        pygame.draw.rect(SCREEN, u_col, u_rect, border_radius=6)
+        if is_user_active:
+            pygame.draw.rect(SCREEN, (255, 255, 255), u_rect, width=2, border_radius=6)
+        ut = FONT.render(f"Name: {self.username}", True, (255, 255, 255))
+        SCREEN.blit(ut, (WIDTH // 2 - 90, 274))
+
+        # IP Field (with active border highlight)
+        is_ip_active = (self.active_field == "ip")
+        ip_rect = pygame.Rect(WIDTH // 2 - 100, 310, 200, 35)
+        ip_col = (80, 120, 220) if is_ip_active else (50, 50, 70)
+        pygame.draw.rect(SCREEN, ip_col, ip_rect, border_radius=6)
+        if is_ip_active:
+            pygame.draw.rect(SCREEN, (255, 255, 255), ip_rect, width=2, border_radius=6)
+        jt = FONT.render(f"IP: {self.ip_input}", True, (255, 255, 255))
+        SCREEN.blit(jt, (WIDTH // 2 - 90, 319))
+
+        # Join Server Button (with hover highlight)
+        join_rect = pygame.Rect(WIDTH // 2 - 100, 355, 200, 40)
+        join_col = (70, 110, 210) if join_rect.collidepoint(mx, my) else (50, 90, 180)
+        pygame.draw.rect(SCREEN, join_col, join_rect, border_radius=6)
+        jbt = FONT.render("Join Server", True, (255, 255, 255))
+        SCREEN.blit(jbt, (WIDTH // 2 - jbt.get_width() // 2, 366))
 
     def handle_lobby_events(self, event):
         if event.type == pygame.KEYDOWN:
@@ -496,23 +551,6 @@ class ClientApp:
 
     def to_screen_angle(self, angle):
         return angle + math.pi if self.player_id == 0 else angle
-
-    def draw_menu(self):
-        SCREEN.fill((25, 25, 30))
-        t = BIG_FONT.render("Realtime Chess - Main Menu", True, (255, 255, 255))
-        SCREEN.blit(t, (WIDTH // 2 - t.get_width() // 2, 100))
-
-        pygame.draw.rect(SCREEN, (50, 150, 50), (WIDTH // 2 - 100, 220, 200, 45), border_radius=6)
-        ht = FONT.render("Host Game Server", True, (255, 255, 255))
-        SCREEN.blit(ht, (WIDTH // 2 - ht.get_width() // 2, 233))
-
-        pygame.draw.rect(SCREEN, (50, 50, 70), (WIDTH // 2 - 100, 290, 200, 45), border_radius=6)
-        jt = FONT.render(f"IP: {self.ip_input}", True, (255, 255, 255))
-        SCREEN.blit(jt, (WIDTH // 2 - 90, 303))
-
-        pygame.draw.rect(SCREEN, (50, 90, 180), (WIDTH // 2 - 100, 345, 200, 40), border_radius=6)
-        jbt = FONT.render("Join Server", True, (255, 255, 255))
-        SCREEN.blit(jbt, (WIDTH // 2 - jbt.get_width() // 2, 356))
 
     def draw_board(self):
         board_rect = pygame.Rect(150, 40, 500, 500)
