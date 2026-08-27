@@ -37,16 +37,20 @@ def generate_heightmap(size, water_enabled):
     logging.debug(f"Generating heightmap for board size {size} with water_enabled={water_enabled}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
     cx, cy = size / 2.0, size / 2.0
+
     for r in range(size):
         for c in range(size):
             nx, ny = c / float(size), r / float(size)
-            h = (math.sin(nx * 3.14 * 4) * math.cos(ny * 3.14 * 4) * 2.5) + random.uniform(-0.3, 0.3)
+
+            # Ground ranges strictly above 0.0
+            h = abs(math.sin(nx * 3.14 * 4) * math.cos(ny * 3.14 * 4) * 2.0) + 0.1
 
             if water_enabled:
                 dist_from_center = math.hypot(c - cx, r - cy)
                 lake_radius = size * 0.18
                 if dist_from_center < lake_radius:
                     depth_factor = (1.0 - (dist_from_center / lake_radius)) ** 2
+                    # Water ranges below 0.0
                     h = -0.5 - (depth_factor * 1.5)
 
             grid[r][c] = round(h, 2)
@@ -55,8 +59,11 @@ def generate_heightmap(size, water_enabled):
 def get_height_at_pos(wx, wy, heightmap, board_size):
     if not heightmap:
         return 0.0
-    c = max(0, min(board_size - 1, int(wx / (800.0 / board_size))))
-    r = max(0, min(board_size - 1, int(wy / (800.0 / board_size))))
+
+    tile_size = 800.0 / board_size
+    c = max(0, min(board_size - 1, int(wx / tile_size)))
+    r = max(0, min(board_size - 1, int(wy / tile_size)))
+
     return heightmap[r][c]
 
 def has_cone_vision(viewer, target_x, target_y):
@@ -96,7 +103,10 @@ class Server:
         self.water_rising_enabled = False
         self.water_enabled = True
         self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
-        self.water_level = -0.5
+        # Inside Server.__init__
+        self.water_level = 0.0  # Set water threshold to 0.0
+
+
 
         self.starting_gold = 2000
         self.state = "LOBBY"
@@ -218,7 +228,7 @@ class Server:
         elif mtype == "START_GAME" and pid == 0 and self.state == "LOBBY":
             logging.info("Host started the game. Entering SHOP phase.")
             self.state = "SHOP"
-            self.water_level = -1.2 if self.water_enabled else -0.5
+            self.water_level = 0.0 if self.water_enabled else -99.0
             self.units = []
 
             tile_pixel_size = 800.0 / self.board_size
@@ -404,9 +414,11 @@ class Server:
             for u in self.units:
                 u["is_hit"] = False
 
-                h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
-                if h <= self.water_level:
-                    u["hp"] -= 0.8
+                # Corrected code: Units take damage only in water, grass/land is completely safe
+                if self.water_enabled:
+                    h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                    if h <= self.water_level:
+                        u["hp"] -= 0.8  # Apply water damage only
 
                 target = None
                 if u["type"] == "Healer":
