@@ -167,19 +167,27 @@ class ClientApp:
             self.chat_messages.append(f"Connection failed: {e}")
 
     def network_thread(self):
-        buffer = ""
-        while True:
-            try:
-                data = self.sock.recv(4096).decode('utf-8')
-                if not data:
+            buffer = ""
+            while True:
+                try:
+                    data = self.sock.recv(4096).decode('utf-8')
+                    if not data:
+                        break
+                    buffer += data
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        msg = json.loads(line)
+                        self.handle_server_msg(msg)
+                except:
                     break
-                buffer += data
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    msg = json.loads(line)
-                    self.handle_server_msg(msg)
-            except:
-                break
+
+            # When the loop breaks, force the client back to the main menu screen
+            self.state = "MENU"
+            self.game_state = "LOBBY"
+            if self.sock:
+                self.sock.close()
+                self.sock = None
+            self.chat_messages.append("System: Server closed. Returned to main menu.")
 
     def handle_server_msg(self, msg):
         mtype = msg.get("type")
@@ -190,6 +198,13 @@ class ClientApp:
             self.heightmap = msg.get("heightmap", [])
             self.water_level = msg.get("water_level", -0.5)
             self.starting_gold = msg["starting_gold"]
+        elif mtype == "PLAYER_DISCONNECT":
+                    self.scores = {int(k): v for k, v in msg["scores"].items()}
+                    self.game_state = "LOBBY"
+                    self.state = "CONNECTED"  # Keep them connected to the server session in the lobby
+                    self.units = []
+                    self.projectiles = []
+                    self.chat_messages.append(f"System: Player {msg['disconnected_id'] + 1} disconnected. Returned to lobby.")
         elif mtype == "CHAT":
             self.chat_messages.append(f"{msg['sender']}: {msg['text']}")
         elif mtype == "BOARD_SIZE":
@@ -233,22 +248,27 @@ class ClientApp:
             else:
                 play_pitched_melee(utype)
         elif mtype == "GAME_UPDATE":
-            old_positions = {u["id"]: (u["x"], u["y"]) for u in self.units}
-            self.units = msg["units"]
-            self.projectiles = msg.get("projectiles", [])
-            self.water_level = msg.get("water_level", self.water_level)
+                    old_positions = {u["id"]: (u["x"], u["y"]) for u in self.units}
+                    self.units = msg["units"]
+                    self.projectiles = msg.get("projectiles", [])
+                    self.water_level = msg.get("water_level", self.water_level)
 
-            moving = False
-            for u in self.units:
-                if u["owner"] == self.player_id and u["id"] in old_positions:
-                    ox, oy = old_positions[u["id"]]
-                    if math.hypot(u["x"] - ox, u["y"] - oy) > 0.4:
-                        moving = True
-                        break
-            if moving and self.anim_tick % 25 == 0:
-                FOOTSTEP_SOUNDS[self.footstep_index].set_volume(0.25)
-                FOOTSTEP_SOUNDS[self.footstep_index].play()
-                self.footstep_index = 1 - self.footstep_index
+                    # Count how many of your own units are actively moving
+                    moving_count = 0
+                    for u in self.units:
+                        if u["owner"] == self.player_id and u["id"] in old_positions:
+                            ox, oy = old_positions[u["id"]]
+                            if math.hypot(u["x"] - ox, u["y"] - oy) > 0.4:
+                                moving_count += 1
+
+                    # Scale the step frequency based on how many units are moving (more units = smaller tick threshold)
+                    threshold = max(5, 25 - (moving_count * 3))
+
+                    if moving_count > 0 and self.anim_tick % threshold == 0:
+                        # Quieter volume set to 0.1 instead of 0.25
+                        FOOTSTEP_SOUNDS[self.footstep_index].set_volume(0.1)
+                        FOOTSTEP_SOUNDS[self.footstep_index].play()
+                        self.footstep_index = 1 - self.footstep_index
         elif mtype == "GAME_OVER":
             self.scores = {int(k): v for k, v in msg["scores"].items()}
             self.game_state = "LOBBY"
@@ -263,12 +283,14 @@ class ClientApp:
             mx, my = event.pos
             # Using precise Rect objects matching the draw routine
             if pygame.Rect(WIDTH // 2 - 100, 220, 200, 45).collidepoint(mx, my):
-                try:
-                    self.server_process = subprocess.Popen(["uv", "run", "server.py"])
-                    time.sleep(0.6)
-                    self.connect_to_server("127.0.0.1")
-                except Exception as e:
-                    print(f"Failed to launch server via uv: {e}")
+                            try:
+                                # Launch server using the current Python interpreter safely
+                                self.server_process = subprocess.Popen([sys.executable, "server.py"])
+                                time.sleep(0.8)
+                                self.connect_to_server("127.0.0.1")
+                            except Exception as e:
+                                self.chat_messages.append(f"Server start failed: {e}")
+                                print(f"Failed to launch server: {e}")
             elif pygame.Rect(WIDTH // 2 - 100, 345, 200, 40).collidepoint(mx, my):
                 self.connect_to_server(self.ip_input)
         elif event.type == pygame.KEYDOWN:
@@ -288,8 +310,11 @@ class ClientApp:
                 self.send({"type": "SET_BOARD_SIZE", "size": min(48, self.board_size + 2)})
             elif event.key == pygame.K_DOWN and self.player_id == 0:
                 self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
-            elif event.key == pygame.K_g and self.player_id == 0:
+            elif event.key == pygame.K_RIGHT and self.player_id == 0:
                 self.starting_gold = max(100, self.starting_gold + 100)
+                self.send({"type": "SET_STARTING_GOLD", "starting_gold": self.starting_gold})
+            elif event.key == pygame.K_LEFT and self.player_id == 0:
+                self.starting_gold = max(100, self.starting_gold - 100)
                 self.send({"type": "SET_STARTING_GOLD", "starting_gold": self.starting_gold})
             elif event.key == pygame.K_w and self.player_id == 0:
                 self.water_rising = not self.water_rising
@@ -380,21 +405,25 @@ class ClientApp:
         pygame.draw.rect(SCREEN, (50, 90, 180), (WIDTH // 2 - 100, 345, 200, 40), border_radius=6)
         jbt = FONT.render("Join Server", True, (255, 255, 255))
         SCREEN.blit(jbt, (WIDTH // 2 - jbt.get_width() // 2, 356))
-
     def draw_board(self):
         tile_size = BOARD_DIM / float(self.board_size)
         for r in range(self.board_size):
             for c in range(self.board_size):
                 map_r = self.board_size - 1 - r if self.player_id == 0 else r
                 map_c = self.board_size - 1 - c if self.player_id == 0 else c
-                base_color = (235, 235, 208) if (map_r + map_c) % 2 == 0 else (119, 148, 85)
+
+                # Uniform solid green grass (no checkered pattern, no yellow)
+                base_color = (105, 185, 85)
                 color = base_color
+
                 if self.heightmap and map_r < len(self.heightmap) and map_c < len(self.heightmap[map_r]):
                     h = self.heightmap[map_r][map_c]
                     if h <= self.water_level:
                         color = (40, 120, 220)
                     elif h > 0:
-                        color = (min(255, int(base_color[0] + h * 70)), min(255, int(base_color[1] + h * 40)), max(0, int(base_color[2] - h * 50)))
+                        color = (min(255, int(base_color[0] + h * 110)), min(255, int(base_color[1] + h * 70)), max(0, int(base_color[2] - h * 80)))
+                    else:
+                        color = (max(0, int(base_color[0] + h * 50)), max(0, int(base_color[1] + h * 50)), max(0, int(base_color[2] + h * 50)))
                 pygame.draw.rect(SCREEN, color, (math.floor(BOARD_OFFSET_X + c * tile_size), math.floor(BOARD_OFFSET_Y + r * tile_size), math.ceil(tile_size), math.ceil(tile_size)))
 
     def draw_units_and_projectiles(self):
@@ -413,18 +442,22 @@ class ClientApp:
                 foot_offset = math.sin(self.anim_tick * 0.4) * 4
             else:
                 foot_offset = 0
+                left_foot_x = sx - math.sin(s_angle) * (draw_radius * 0.6) + math.cos(s_angle) * foot_offset
+                left_foot_y = sy + math.cos(s_angle) * (draw_radius * 0.6) + math.sin(s_angle) * foot_offset
+                right_foot_x = sx + math.sin(s_angle) * (draw_radius * 0.6) - math.cos(s_angle) * foot_offset
+                right_foot_y = sy - math.cos(s_angle) * (draw_radius * 0.6) - math.sin(s_angle) * foot_offset
 
-            left_foot_x = sx - math.sin(s_angle) * (draw_radius * 0.6) + math.cos(s_angle) * foot_offset
-            left_foot_y = sy + math.cos(s_angle) * (draw_radius * 0.6) + math.sin(s_angle) * foot_offset
-            right_foot_x = sx + math.sin(s_angle) * (draw_radius * 0.6) - math.cos(s_angle) * foot_offset
-            right_foot_y = sy - math.cos(s_angle) * (draw_radius * 0.6) - math.sin(s_angle) * foot_offset
+                foot_radius = max(1, int(draw_radius * 0.25))
+                pygame.draw.circle(SCREEN, (20, 20, 20), (int(left_foot_x), int(left_foot_y)), foot_radius)
+                pygame.draw.circle(SCREEN, (20, 20, 20), (int(right_foot_x), int(right_foot_y)), foot_radius)
 
-            pygame.draw.circle(SCREEN, (20, 20, 20), (int(left_foot_x), int(left_foot_y)), 3)
-            pygame.draw.circle(SCREEN, (20, 20, 20), (int(right_foot_x), int(right_foot_y)), 3)
+                # Clean white selection outline (replaced yellow)
+                if u["id"] in self.selected_units:
+                    pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
 
+                shape = u["shape"]
             if u["id"] in self.selected_units:
-                pygame.draw.circle(SCREEN, (255, 255, 0), (int(sx), int(sy)), collision_radius + 2, 1)
-
+                pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
             shape = u["shape"]
             draw_color = (255, 255, 255) if u.get("is_hit", False) else color
             if shape == "circle":

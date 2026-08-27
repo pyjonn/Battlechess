@@ -5,17 +5,42 @@ import math
 import random
 import time
 import os
+import argparse
+import logging
 
 HOST = "0.0.0.0"
 PORT = 5555
 
+def setup_logging(verbose):
+    log_level = logging.DEBUG if verbose else logging.INFO
+    log_format = "%(asctime)s [%(levelname)s] %(message)s"
+
+    logger = logging.getLogger()
+    logger.setLevel(log_level)
+
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    # Terminal output handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(logging.Formatter(log_format))
+    logger.addHandler(console_handler)
+
+    # File output handler
+    file_handler = logging.FileHandler("server.log")
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(log_format))
+    logger.addHandler(file_handler)
+
 def generate_heightmap(size, water_enabled):
+    logging.debug(f"Generating heightmap for board size {size} with water_enabled={water_enabled}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
     cx, cy = size / 2.0, size / 2.0
     for r in range(size):
         for c in range(size):
             nx, ny = c / float(size), r / float(size)
-            h = (math.sin(nx * 3.14 * 4) * math.cos(ny * 3.14 * 4) * 1.0) + random.uniform(-0.3, 0.3)
+            h = (math.sin(nx * 3.14 * 4) * math.cos(ny * 3.14 * 4) * 2.5) + random.uniform(-0.3, 0.3)
 
             if water_enabled:
                 dist_from_center = math.hypot(c - cx, r - cy)
@@ -34,7 +59,6 @@ def get_height_at_pos(wx, wy, heightmap, board_size):
     r = max(0, min(board_size - 1, int(wy / (800.0 / board_size))))
     return heightmap[r][c]
 
-# Replace the old has_plain_circle_vision function with this directional cone check
 def has_cone_vision(viewer, target_x, target_y):
     max_range = 200.0
     dx = target_x - viewer["x"]
@@ -44,12 +68,9 @@ def has_cone_vision(viewer, target_x, target_y):
     if dist > max_range:
         return False
 
-    # Calculate angle to target and compare with viewer's facing angle
     target_angle = math.atan2(dy, dx)
     angle_diff = (target_angle - viewer["angle"] + math.pi) % (2 * math.pi) - math.pi
-
-    # 90-degree total field of view (45 degrees to the left and right)
-    return abs(angle_diff) <= math.pi / 4
+    return abs(angle_diff) <= math.radians(75)
 
 def lerp_angle(current, target, max_delta):
     diff = (target - current + math.pi) % (2 * math.pi) - math.pi
@@ -61,6 +82,7 @@ def lerp_angle(current, target, max_delta):
 
 class Server:
     def __init__(self):
+        logging.info("Initializing Game Server...")
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((HOST, PORT))
@@ -68,7 +90,7 @@ class Server:
 
         self.clients = {}
         self.scores = {0: 0, 1: 0}
-        self.board_size = 24
+        self.board_size = 32
         self.fog_enabled = False
         self.water_rising_enabled = False
         self.water_enabled = True
@@ -83,17 +105,36 @@ class Server:
         self.ready = {0: False, 1: False}
         self.next_unit_id = 1
         self.lock = threading.Lock()
+        logging.info(f"Server initialized successfully on board size {self.board_size}x{self.board_size}")
 
     def broadcast(self, msg):
         data = (json.dumps(msg) + "\n").encode('utf-8')
         with self.lock:
-            for pid, cl_sock in list(self.clients.items()):
+            for player_id, conn in list(self.clients.items()):
                 try:
-                    cl_sock.sendall(data)
-                except:
-                    pass
+                    conn.sendall(data)
+                except Exception as e:
+                    logging.error(f"Failed to broadcast message to player {player_id}: {e}")
+                    if player_id in self.clients:
+                        del self.clients[player_id]
+
+                    if self.state != "LOBBY":
+                        self.state = "LOBBY"
+                        winner_id = 1 - player_id
+                        self.scores[winner_id] += 1
+                        logging.warning(f"Player {player_id} dropped mid-game. Awarding win to Player {winner_id}")
+
+                        try:
+                            conn.sendall((json.dumps({
+                                "type": "PLAYER_DISCONNECT",
+                                "disconnected_id": player_id,
+                                "scores": self.scores
+                            }) + "\n").encode('utf-8'))
+                        except:
+                            pass
 
     def handle_client(self, player_id, conn):
+        logging.info(f"Handling connection for Player {player_id}")
         conn.sendall((json.dumps({
             "type": "INIT",
             "player_id": player_id,
@@ -115,34 +156,48 @@ class Server:
                     line, buffer = buffer.split("\n", 1)
                     msg = json.loads(line)
                     self.process_message(player_id, msg)
-            except:
+            except Exception as e:
+                logging.debug(f"Exception in client handler for Player {player_id}: {e}")
                 break
 
         with self.lock:
             if player_id in self.clients:
                 del self.clients[player_id]
+                logging.info(f"Player {player_id} disconnected and removed from clients list.")
 
     def process_message(self, pid, msg):
         mtype = msg.get("type")
+        logging.debug(f"Processing message type '{mtype}' from Player {pid}")
 
         if mtype == "CHAT":
+            logging.info(f"Chat from Player {pid + 1}: {msg['text']}")
             self.broadcast({"type": "CHAT", "sender": f"Player {pid + 1}", "text": msg["text"]})
 
         elif mtype == "SET_BOARD_SIZE" and pid == 0 and self.state == "LOBBY":
             self.board_size = msg["size"]
+            logging.info(f"Host updated board size to {self.board_size}")
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
             self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
 
+        elif mtype == "SET_WATER_RISING" and pid == 0 and self.state == "LOBBY":
+            self.water_rising_enabled = msg["rising"]
+            logging.info(f"Host set water rising to: {self.water_rising_enabled}")
+            self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled})
+
         elif mtype == "SET_STARTING_GOLD" and pid == 0 and self.state == "LOBBY":
-            self.starting_gold = max(500, min(5000, msg["gold"]))
+            self.starting_gold = max(500, min(5000, msg["starting_gold"]))
+            self.gold = {0: self.starting_gold, 1: self.starting_gold}
+            logging.info(f"Host set starting gold to: {self.starting_gold}")
             self.broadcast({"type": "GOLD_SETTING_UPDATE", "starting_gold": self.starting_gold})
 
         elif mtype == "TOGGLE_FOG" and pid == 0:
             self.fog_enabled = msg["fog"]
+            logging.info(f"Host toggled fog: {self.fog_enabled}")
             self.broadcast({"type": "SETTINGS_UPDATE", "fog": self.fog_enabled, "water": self.water_enabled})
 
         elif mtype == "TOGGLE_WATER" and pid == 0:
             self.water_enabled = msg["water"]
+            logging.info(f"Host toggled water: {self.water_enabled}")
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
             self.broadcast({
                 "type": "SETTINGS_UPDATE",
@@ -152,10 +207,13 @@ class Server:
             })
 
         elif mtype == "START_GAME" and pid == 0 and self.state == "LOBBY":
+            logging.info("Host started the game. Entering SHOP phase.")
             self.state = "SHOP"
             self.water_level = -1.2 if self.water_enabled else -0.5
             self.units = []
 
+            tile_pixel_size = 800.0 / self.board_size
+            four_block_radius = int(2.0 * tile_pixel_size)
             for p in [0, 1]:
                 king_x = 400
                 king_y = 120 if p == 0 else 680
@@ -175,8 +233,8 @@ class Server:
                     "is_hit": False,
                     "last_attack": 0,
                     "target_unit": None,
-                    "draw_radius": 10,
-                    "radius": 13,
+                    "draw_radius": int(tile_pixel_size * 1.5),
+                    "radius": four_block_radius,
                     "vx": 0.0,
                     "vy": 0.0
                 })
@@ -200,6 +258,7 @@ class Server:
 
             if self.gold[pid] >= cost:
                 self.gold[pid] -= cost
+                logging.info(f"Player {pid} bought {utype} for ${cost}. Remaining gold: ${self.gold[pid]}")
 
                 player_units = [u for u in self.units if u["owner"] == pid]
                 row_idx = len(player_units) // 6
@@ -209,18 +268,23 @@ class Server:
                 spawn_x = 200 + (col_idx * 45)
                 spawn_y = base_y + (row_idx * 25 * (1 if pid == 0 else -1))
 
+                tile_pixel_size = 800.0 / self.board_size
+                four_block_radius = int(2.0 * tile_pixel_size)
+
                 shapes = {
-                    "Pawn": "circle",
-                    "Rook": "square",
-                    "Knight": "pentagon",
-                    "Queen": "hexagon",
-                    "Bishop": "triangle",
-                    "Healer": "cross"
+                    "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
+                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
                 }
                 max_hps = {"Pawn": 100, "Knight": 80, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
-                draw_radii = {"Pawn": 9, "Knight": 11, "Bishop": 10, "Healer": 10, "Rook": 10, "Queen": 11}
+                draw_radii = {
+                    "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
+                    "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
+                    "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
+                }
                 collision_radii = {
-                    "Pawn": 15, "Knight": 18, "Bishop": 14, "Healer": 14, "Rook": 16, "Queen": 16
+                    "Pawn": four_block_radius, "Knight": four_block_radius,
+                    "Bishop": four_block_radius, "Healer": four_block_radius,
+                    "Rook": four_block_radius, "Queen": four_block_radius
                 }
 
                 self.units.append({
@@ -249,9 +313,11 @@ class Server:
 
         elif mtype == "READY_SHOP" and self.state == "SHOP":
             self.ready[pid] = True
+            logging.info(f"Player {pid} is ready in shop.")
             self.broadcast({"type": "SHOP_UPDATE", "units": self.units, "gold": self.gold, "ready": self.ready})
             if all(self.ready.values()) or len(self.clients) == 1:
                 self.state = "IN_GAME"
+                logging.info("All players ready. Transitioning state to IN_GAME.")
                 self.broadcast({
                     "type": "GAME_START",
                     "units": self.units,
@@ -264,6 +330,7 @@ class Server:
             u_ids = msg.get("unit_ids", [])
             tx, ty = msg["target_pos"]
             t_unit = msg.get("target_unit")
+            logging.debug(f"Player {pid} issued command to units {u_ids} targeting position ({tx}, {ty})")
 
             selected_group = [u for u in self.units if u["owner"] == pid and u["id"] in u_ids]
 
@@ -297,7 +364,7 @@ class Server:
                     has_had_clients = True
 
                 if has_had_clients and self.state != "LOBBY" and len(self.clients) == 0:
-                    print("All clients disconnected. Shutting down server.")
+                    logging.info("All clients disconnected. Shutting down server.")
                     os._exit(0)
 
             if self.state != "IN_GAME":
@@ -366,15 +433,22 @@ class Server:
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
-
                 if dist > 3:
                     u["is_moving"] = True
-                    if u["type"] == "Bishop":
-                        speed = 3.6
-                    elif u["type"] == "King":
-                        speed = 2.0
-                    else:
-                        speed = 2.5
+
+                    base_speed = 3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2)
+                    speed = base_speed * (14.0 / max(8.0, float(u["radius"])))
+
+                    current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                    ahead_x = u["x"] + (dx / dist) * 10.0
+                    ahead_y = u["y"] + (dy / dist) * 10.0
+                    ahead_h = get_height_at_pos(ahead_x, ahead_y, self.heightmap, self.board_size)
+
+                    height_diff = ahead_h - current_h
+                    if height_diff > 0.05:
+                        speed *= max(0.4, 1.0 - (height_diff * 0.8))
+                    elif height_diff < -0.05:
+                        speed *= min(1.6, 1.0 + (abs(height_diff) * 0.6))
 
                     step_x = (dx / dist) * speed
                     step_y = (dy / dist) * speed
@@ -384,8 +458,9 @@ class Server:
                     u["vx"] = step_x
                     u["vy"] = step_y
 
-                    desired_angle = math.atan2(dy, dx)
-                    u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
+                    if not target or not has_cone_vision(u, target["x"], target["y"]):
+                        desired_angle = math.atan2(dy, dx)
+                        u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
 
                     u["x"] = max(u["radius"], min(800 - u["radius"], u["x"]))
                     u["y"] = max(u["radius"], min(800 - u["radius"], u["y"]))
@@ -397,43 +472,25 @@ class Server:
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                     u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
-                    if target:
-                                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
-                                        can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
 
-                                        # Calculate height difference for bonus damage
-                                        attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
-                                        target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
-                                        bonus_dmg = int(max(0, attacker_h - target_h) * 15)
+                    e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
+                    can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
 
-                                        if u["type"] == "Knight":
-                                            if e_dist < 220 and can_see and now - u["last_attack"] > 1.2:
-                                                u["last_attack"] = now
-                                                base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                                                u["angle"] = base_ang
+                    attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                    target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
+                    bonus_dmg = int(max(0, attacker_h - target_h) * 15)
 
-                                                self.projectiles.append({
-                                                    "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.25, 0.25),
-                                                    "owner": u["owner"], "damage": 25 + bonus_dmg, "life": 40
-                                                })
-                                                self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
-                                        elif u["type"] == "Healer":
-                                            heal_range = (u["radius"] + target["radius"] + 10)
-                                            if e_dist < heal_range and now - u["last_attack"] > 0.8:
-                                                u["last_attack"] = now
-                                                target["hp"] = min(target["max_hp"], target["hp"] + 15)
-                                                target["is_hit"] = True
-                                                self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
-                                        else:
-                                            attack_range = (u["radius"] + target["radius"] + 8)
-                                            cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
-                                            damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
+                    if u["type"] == "Knight":
+                         if e_dist < 220 and can_see and now - u["last_attack"] > 2.0:
+                             u["last_attack"] = now
+                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
+                             u["angle"] = base_ang
 
-                                            if e_dist < attack_range and can_see and now - u["last_attack"] > cooldown:
-                                                u["last_attack"] = now
-                                                target["hp"] -= (damage_val + bonus_dmg)
-                                                target["is_hit"] = True
-                                                self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
+                             self.projectiles.append({
+                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.25, 0.25),
+                                 "owner": u["owner"], "damage": 25 + bonus_dmg, "life": 40
+                             })
+                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
                     elif u["type"] == "Healer":
                         heal_range = (u["radius"] + target["radius"] + 10)
                         if e_dist < heal_range and now - u["last_attack"] > 0.8:
@@ -443,26 +500,19 @@ class Server:
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
                     else:
                         attack_range = (u["radius"] + target["radius"] + 8)
-                        if u["type"] == "Bishop":
-                            cooldown = 0.6
-                            damage_val = 18
-                        elif u["type"] == "King":
-                            cooldown = 1.0
-                            damage_val = 30
-                        else:
-                            cooldown = 0.8
-                            damage_val = 20
+                        cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
+                        damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
 
                         if e_dist < attack_range and can_see and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
-                            target["hp"] -= damage_val
+                            target["hp"] -= (damage_val + bonus_dmg)
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
 
             alive_projectiles = []
             for p in self.projectiles:
-                p["x"] += math.cos(p["angle"]) * 7.0
-                p["y"] += math.sin(p["angle"]) * 7.0
+                p["x"] += math.cos(p["angle"]) * 11.0
+                p["y"] += math.sin(p["angle"]) * 11.0
                 p["life"] -= 1
                 hit = False
 
@@ -493,6 +543,7 @@ class Server:
 
                 self.scores[winner] += 1
                 self.state = "LOBBY"
+                logging.info(f"Game Over! Round won by Player {winner + 1}. Current scores: {self.scores}")
                 self.broadcast({"type": "GAME_OVER", "winner": winner, "scores": self.scores})
             else:
                 self.broadcast({
@@ -504,14 +555,20 @@ class Server:
 
     def run(self):
         threading.Thread(target=self.game_loop, daemon=True).start()
-        print(f"Server started on {HOST}:{PORT}")
+        logging.info(f"Server started and listening on {HOST}:{PORT}")
         current_id = 0
         while True:
             conn, addr = self.sock.accept()
+            logging.info(f"New connection accepted from {addr}")
             with self.lock:
                 self.clients[current_id] = conn
             threading.Thread(target=self.handle_client, args=(current_id, conn), daemon=True).start()
             current_id = (current_id + 1) % 2
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Realtime Chess Game Server")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
+    args = parser.parse_args()
+
+    setup_logging(args.verbose)
     Server().run()
