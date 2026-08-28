@@ -281,7 +281,29 @@ class Server:
                 self.next_unit_id += 1
 
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
-            self.gold = {p: self.starting_gold for p in connected_players}
+            # AFTER
+            self.gold = {}
+            connected_players = list(self.clients.keys())
+
+            if self.game_mode == "2v2":
+                team_counts = {
+                    0: sum(1 for p in connected_players if p % 2 == 0),
+                    1: sum(1 for p in connected_players if p % 2 == 1)
+                }
+                for p in connected_players:
+                    my_team = p % 2
+                    opp_team = 1 - my_team
+                    if team_counts[my_team] == 1 and team_counts[opp_team] == 2:
+                        self.gold[p] = int(self.starting_gold * 2.2)
+                    else:
+                        self.gold[p] = self.starting_gold
+            else:
+                for p in connected_players:
+                    self.gold[p] = self.starting_gold
+                    if len(connected_players) == 3 and self.game_mode == "2v2":
+                        self.gold[p] = int(self.starting_gold * 2.2)
+                    else:
+                        self.gold[p] = self.starting_gold
             self.ready = {p: False for p in connected_players}
 
             self.broadcast({

@@ -1,4 +1,3 @@
-# client.py
 import pygame
 import socket
 import threading
@@ -78,13 +77,6 @@ pygame.display.set_caption("Realtime-Chess Client")
 FONT = pygame.font.SysFont("Arial", 14, bold=True)
 BIG_FONT = pygame.font.SysFont("Arial", 20, bold=True)
 
-PLAYER_COLORS = {
-    0: (60, 120, 240),  # Blue
-    1: (220, 60, 60),   # Red
-    2: (60, 220, 60),   # Green
-    3: (220, 220, 60)   # Yellow
-}
-
 SHOP_ITEMS = [
     ("Pawn", 100),
     ("Knight", 150),
@@ -131,6 +123,24 @@ class ClientApp:
         self.camera_x = 0.0
         self.camera_y = 0.0
         self.show_minimap = True
+
+    def get_player_color(self, owner):
+        if self.game_mode == "2v2":
+            team_colors = {
+                0: (60, 120, 240),   # Team 0 - Player 1 (Deep Blue)
+                2: (130, 190, 255),  # Team 0 - Player 3 (Light Sky Blue)
+                1: (220, 60, 60),    # Team 1 - Player 2 (Deep Red)
+                3: (255, 140, 120)   # Team 1 - Player 4 (Light Coral Red)
+            }
+            return team_colors.get(owner, (255, 255, 255))
+        else:
+            ffa_colors = {
+                0: (60, 120, 240),   # Blue
+                1: (220, 60, 60),    # Red
+                2: (60, 220, 60),    # Green
+                3: (220, 220, 60)    # Yellow
+            }
+            return ffa_colors.get(owner, (255, 255, 255))
 
     def update_default_zoom(self):
         self.zoom = 1.0
@@ -587,7 +597,7 @@ class ClientApp:
         for u in self.units:
             sx, sy = self.to_screen_coords(u["x"], u["y"])
             s_angle = self.to_screen_angle(u["angle"])
-            color = PLAYER_COLORS.get(u["owner"], (255, 255, 255))
+            color = self.get_player_color(u["owner"])
 
             block_width = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
@@ -653,7 +663,7 @@ class ClientApp:
 
             ux = mm_x + int((rwx / WORLD_SIZE) * mm_size)
             uy = mm_y + int((rwy / WORLD_SIZE) * mm_size)
-            col = PLAYER_COLORS.get(u["owner"], (255, 255, 255))
+            col = self.get_player_color(u["owner"])
             pygame.draw.circle(SCREEN, col, (ux, uy), 2)
 
         vw = int(((WORLD_SIZE / self.zoom) / WORLD_SIZE) * mm_size)
