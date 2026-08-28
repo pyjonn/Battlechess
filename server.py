@@ -389,7 +389,7 @@ class Server:
                     "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
                 }
                 # ... [Keep the rest of the unit dictionary generation identical] ...
-                max_hps = {"Pawn": 100, "Knight": 80, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
+                max_hps = {"Pawn": 100, "Knight": 10, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
