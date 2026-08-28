@@ -158,7 +158,6 @@ class ClientApp:
                 pan_speed = 400.0 * dt / self.zoom
                 max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
 
-                # Camera operations are inherently bound to the rotated spatial perspective of the active player
                 if keys[pygame.K_w] or keys[pygame.K_UP]:
                     self.camera_y = max(0.0, self.camera_y - pan_speed)
                 if keys[pygame.K_s] or keys[pygame.K_DOWN]:
@@ -563,14 +562,22 @@ class ClientApp:
                     h = self.heightmap[r][c]
                     if h <= self.water_level:
                         color = (40, 120, 220)
+                    elif h > 0.6:
+                        # High points turn into a stony gray color palette
+                        stone_val = max(110, min(190, int(110 + (h - 0.6) * 160)))
+                        color = (stone_val, stone_val, stone_val + 10)
                     else:
-                        green_val = max(120, min(220, int(160 + h * 30)))
-                        color = (40, green_val, 50)
+                        # Shaded green levels to distinctly indicate hill contour and high points
+                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (0.6 - self.water_level)))
+                        red_val = int(25 + norm_h * 75)
+                        green_val = int(105 + norm_h * 135)
+                        blue_val = int(30 + norm_h * 45)
+                        color = (red_val, min(255, green_val), blue_val)
                 else:
                     color = (105, 185, 85)
 
-                wx = c * ts_world + ts_world/2.0
-                wy = r * ts_world + ts_world/2.0
+                wx = c * ts_world + ts_world / 2.0
+                wy = r * ts_world + ts_world / 2.0
                 sx, sy = self.to_screen_coords(wx, wy)
 
                 margin = rect_size

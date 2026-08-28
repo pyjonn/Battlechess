@@ -281,7 +281,6 @@ class Server:
                 self.next_unit_id += 1
 
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
-            # AFTER
             self.gold = {}
             connected_players = list(self.clients.keys())
 
@@ -474,11 +473,10 @@ class Server:
                 continue
 
             if self.water_enabled and self.water_rising_enabled:
-                self.water_level += 0.001
+                self.water_level += 0.0001
 
             now = time.time()
 
-            # Separate unit collision calculations into their own dedicated loop
             for i in range(len(self.units)):
                 for j in range(i + 1, len(self.units)):
                     u1 = self.units[i]
@@ -497,21 +495,17 @@ class Server:
                         u2["x"] += nx * (overlap * 0.5)
                         u2["y"] += ny * (overlap * 0.5)
 
-            # Main unit movement, depth scaling, and attack loop
             for u in self.units:
                 u["is_hit"] = False
                 target = None
 
-                # Calculate current ground elevation and depth submerged
                 current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                 water_depth = max(0.0, self.water_level - current_h)
 
-                # DEPTH-BASED HURT: Deeper water deals more damage per tick
                 if water_depth > 0:
                     u["hp"] -= water_depth * 0.8
                     u["is_hit"] = True
 
-                # Target selection logic
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
@@ -543,7 +537,6 @@ class Server:
                     u["target_x"] = target["x"]
                     u["target_y"] = target["y"]
 
-                # Movement logic
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
@@ -567,7 +560,6 @@ class Server:
                     elif height_diff < -0.05:
                         speed *= min(1.6, 1.0 + (abs(height_diff) * 0.6))
 
-                    # DEPTH-BASED SLOW: Deeper water reduces movement speed more
                     if water_depth > 0:
                         speed *= max(0.15, 1.0 - (water_depth * 0.75))
 
@@ -589,7 +581,6 @@ class Server:
                     u["vx"] = 0.0
                     u["vy"] = 0.0
 
-                # Combat & Attack logic
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                     u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
@@ -631,7 +622,6 @@ class Server:
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
 
-            # Update ranged projectiles
             alive_projectiles = []
             for p in self.projectiles:
                 p["x"] += math.cos(p["angle"]) * 11.0
@@ -652,7 +642,6 @@ class Server:
             self.projectiles = alive_projectiles
             self.units = [u for u in self.units if u["hp"] > 0]
 
-            # Check for victory conditions
             alive_teams = set()
             for u in self.units:
                 if u["type"] == "King":
