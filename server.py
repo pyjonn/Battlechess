@@ -1,4 +1,3 @@
-# server.py
 import socket
 import threading
 import json
@@ -457,6 +456,7 @@ class Server:
 
             now = time.time()
 
+            # Separate unit collision calculations into their own dedicated loop
             for i in range(len(self.units)):
                 for j in range(i + 1, len(self.units)):
                     u1 = self.units[i]
@@ -475,10 +475,21 @@ class Server:
                         u2["x"] += nx * (overlap * 0.5)
                         u2["y"] += ny * (overlap * 0.5)
 
+            # Main unit movement, depth scaling, and attack loop
             for u in self.units:
                 u["is_hit"] = False
                 target = None
 
+                # Calculate current ground elevation and depth submerged
+                current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                water_depth = max(0.0, self.water_level - current_h)
+
+                # DEPTH-BASED HURT: Deeper water deals more damage per tick
+                if water_depth > 0:
+                    u["hp"] -= water_depth * 0.8
+                    u["is_hit"] = True
+
+                # Target selection logic
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
@@ -510,13 +521,13 @@ class Server:
                     u["target_x"] = target["x"]
                     u["target_y"] = target["y"]
 
+                # Movement logic
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
                 if dist > 3:
                     u["is_moving"] = True
                     tile_pixel_size = 800.0 / self.board_size
-                    # Slowed Rook speed to 1.2 blocks per second
                     base_blocks_per_second = (
                         3.2 if u["type"] == "Bishop" else
                         (1.4 if u["type"] == "King" else
@@ -524,7 +535,6 @@ class Server:
                     )
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
-                    current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                     ahead_x = u["x"] + (dx / dist) * 10.0
                     ahead_y = u["y"] + (dy / dist) * 10.0
                     ahead_h = get_height_at_pos(ahead_x, ahead_y, self.heightmap, self.board_size)
@@ -534,6 +544,10 @@ class Server:
                         speed *= max(0.4, 1.0 - (height_diff * 0.8))
                     elif height_diff < -0.05:
                         speed *= min(1.6, 1.0 + (abs(height_diff) * 0.6))
+
+                    # DEPTH-BASED SLOW: Deeper water reduces movement speed more
+                    if water_depth > 0:
+                        speed *= max(0.15, 1.0 - (water_depth * 0.75))
 
                     step_x = (dx / dist) * speed
                     step_y = (dy / dist) * speed
@@ -553,6 +567,7 @@ class Server:
                     u["vx"] = 0.0
                     u["vy"] = 0.0
 
+                # Combat & Attack logic
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                     u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
@@ -564,7 +579,6 @@ class Server:
                     bonus_dmg = int(max(0, attacker_h - target_h) * 15)
 
                     if u["type"] == "Knight":
-                        # Archers only fire when standing still and range scales with unit radius
                         archer_range = u["radius"] * 20.0
                         projectile_life = max(1, int(archer_range / 11.0))
 
@@ -595,6 +609,7 @@ class Server:
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
 
+            # Update ranged projectiles
             alive_projectiles = []
             for p in self.projectiles:
                 p["x"] += math.cos(p["angle"]) * 11.0
@@ -615,6 +630,7 @@ class Server:
             self.projectiles = alive_projectiles
             self.units = [u for u in self.units if u["hp"] > 0]
 
+            # Check for victory conditions
             alive_teams = set()
             for u in self.units:
                 if u["type"] == "King":
