@@ -11,6 +11,17 @@ import logging
 HOST = "0.0.0.0"
 PORT = 5555
 
+# Point values awarded per unit type defeated
+UNIT_SCORES = {
+    "Pawn": 1,
+    "Knight": 2,
+    "Bishop": 2,
+    "Healer": 2,
+    "Rook": 3,
+    "Queen": 4,
+    "King": 5
+}
+
 def setup_logging(verbose):
     log_level = logging.DEBUG if verbose else logging.INFO
     log_format = "%(asctime)s [%(levelname)s] %(message)s"
@@ -45,7 +56,7 @@ def sample_smooth_noise(grid, x, y):
     bottom = v01 + sx * (v11 - v01)
     return top + sy * (bottom - top)
 
-def generate_heightmap(size, water_enabled, units=None):
+def generate_heightmap(size, water_enabled, units=None, water_rising=False):
     logging.debug(f"Generating randomized heightmap for size {size}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
 
@@ -70,6 +81,19 @@ def generate_heightmap(size, water_enabled, units=None):
                 elevation -= max(0.0, 0.4 - dist_center * 0.3)
 
             grid[r][c] = round(elevation, 2)
+
+    if water_enabled or water_rising:
+        peak_r, peak_c = int(size * 0.5), int(size * 0.5)
+        highest_val = 3.5
+        peak_radius = size * 0.35
+
+        for r in range(size):
+            for c in range(size):
+                dist = math.hypot(c - peak_c, r - peak_r)
+                if dist <= peak_radius:
+                    blend = dist / peak_radius
+                    smooth = 1.0 - (blend * blend * (3 - 2 * blend))
+                    grid[r][c] = max(grid[r][c], grid[r][c] + smooth * highest_val)
 
     if units is not None:
         protected_positions = [(u["x"], u["y"]) for u in units if u["type"] == "King"]
@@ -107,13 +131,14 @@ def has_cone_vision(viewer, target_x, target_y):
     dx = target_x - viewer["x"]
     dy = target_y - viewer["y"]
     dist = math.hypot(dx, dy)
+    return dist <= max_range
 
-    if dist > max_range:
-        return False
-
+def is_in_front_arc(viewer, target_x, target_y, max_angle_radians=math.pi / 2):
+    dx = target_x - viewer["x"]
+    dy = target_y - viewer["y"]
     target_angle = math.atan2(dy, dx)
     angle_diff = (target_angle - viewer["angle"] + math.pi) % (2 * math.pi) - math.pi
-    return abs(angle_diff) <= math.radians(75)
+    return abs(angle_diff) <= max_angle_radians
 
 def lerp_angle(current, target, max_delta):
     diff = (target - current + math.pi) % (2 * math.pi) - math.pi
@@ -133,17 +158,20 @@ class Server:
         self.usernames = {i: f"Player {i+1}" for i in range(4)}
 
         self.clients = {}
-        self.scores = {i: 0 for i in range(4)}
+        self.scores = {i: 0 for i in range(4)}  # Tracks match wins
+        self.kills = {i: 0 for i in range(4)}   # Tracks defeated enemies
         self.board_size = 32
         self.fog_enabled = False
         self.water_rising_enabled = False
         self.water_enabled = True
         self.game_mode = "FFA"
+        self.win_condition = "LAST_MAN_STANDING"
+        self.target_score = 3
 
         self.units = []
         self.projectiles = []
 
-        self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
+        self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units, water_rising=self.water_rising_enabled)
         self.water_level = -0.1
 
         self.starting_gold = 2000
@@ -172,10 +200,34 @@ class Server:
                         conn.sendall((json.dumps({
                             "type": "PLAYER_DISCONNECT",
                             "disconnected_id": player_id,
-                            "scores": self.scores
+                            "scores": self.scores,
+                            "kills": self.kills
                         }) + "\n").encode('utf-8'))
                     except:
                         pass
+
+    def award_kill_score(self, killer_id, unit_type):
+        """Awards defeated enemy points to player/team."""
+        points = UNIT_SCORES.get(unit_type, 1)
+        if self.game_mode == "2v2":
+            for p in self.kills:
+                if (p % 2) == (killer_id % 2):
+                    self.kills[p] += points
+        else:
+            if killer_id in self.kills:
+                self.kills[killer_id] += points
+
+    def award_win(self, winner_id):
+        """Awards match win to player/team."""
+        if winner_id is None or winner_id < 0:
+            return
+        if self.game_mode == "2v2":
+            for p in self.scores:
+                if (p % 2) == (winner_id % 2):
+                    self.scores[p] += 1
+        else:
+            if winner_id in self.scores:
+                self.scores[winner_id] += 1
 
     def handle_client(self, player_id, conn):
         logging.info(f"Handling connection for Player {player_id}")
@@ -183,11 +235,15 @@ class Server:
             "type": "INIT",
             "player_id": player_id,
             "scores": self.scores,
+            "kills": self.kills,
+            "usernames": self.usernames,
             "board_size": self.board_size,
             "heightmap": self.heightmap,
             "water_level": self.water_level,
             "starting_gold": self.starting_gold,
-            "game_mode": self.game_mode
+            "game_mode": self.game_mode,
+            "win_condition": self.win_condition,
+            "target_score": self.target_score
         }) + "\n").encode('utf-8'))
 
         buffer = ""
@@ -216,20 +272,44 @@ class Server:
             name = msg.get("username", f"Player {pid + 1}").strip()
             if name:
                 self.usernames[pid] = name
+                self.broadcast({"type": "USERNAMES_UPDATE", "usernames": self.usernames})
                 self.broadcast({"type": "CHAT", "sender": "System", "text": f"{name} joined the game!"})
 
         elif mtype == "CHAT":
             sender_name = self.usernames.get(pid, f"Player {pid + 1}")
             self.broadcast({"type": "CHAT", "sender": sender_name, "text": msg["text"]})
 
+        elif mtype == "TOGGLE_WIN_CONDITION" and pid == 0 and self.state == "LOBBY":
+            self.win_condition = "MOST_SCORE_AT_END" if self.win_condition == "LAST_MAN_STANDING" else "LAST_MAN_STANDING"
+            self.broadcast({
+                "type": "SETTINGS_UPDATE",
+                "win_condition": self.win_condition,
+                "target_score": self.target_score,
+                "game_mode": self.game_mode,
+                "water_rising": self.water_rising_enabled,
+                "heightmap": self.heightmap
+            })
+
+        elif mtype == "SET_TARGET_SCORE" and pid == 0 and self.state == "LOBBY":
+            self.target_score = max(1, min(20, msg.get("target_score", 3)))
+            self.broadcast({
+                "type": "SETTINGS_UPDATE",
+                "win_condition": self.win_condition,
+                "target_score": self.target_score,
+                "game_mode": self.game_mode,
+                "water_rising": self.water_rising_enabled,
+                "heightmap": self.heightmap
+            })
+
         elif mtype == "SET_BOARD_SIZE" and pid == 0 and self.state == "LOBBY":
             self.board_size = max(12, min(128, msg["size"]))
-            self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
+            self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
             self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
 
         elif mtype == "SET_WATER_RISING" and pid == 0 and self.state == "LOBBY":
             self.water_rising_enabled = msg["rising"]
-            self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled})
+            self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
+            self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled, "heightmap": self.heightmap})
 
         elif mtype == "SET_STARTING_GOLD" and pid == 0 and self.state == "LOBBY":
             self.starting_gold = max(100, min(10000, msg["starting_gold"]))
@@ -237,7 +317,7 @@ class Server:
 
         elif mtype == "TOGGLE_MODE" and pid == 0 and self.state == "LOBBY":
             self.game_mode = "2v2" if self.game_mode == "FFA" else "FFA"
-            self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode})
+            self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode, "win_condition": self.win_condition, "target_score": self.target_score})
 
         elif mtype == "START_GAME" and pid == 0 and self.state == "LOBBY":
             logging.info("Host started the game. Transitioning to SHOP phase.")
@@ -280,9 +360,8 @@ class Server:
                 })
                 self.next_unit_id += 1
 
-            self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
+            self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units, water_rising=self.water_rising_enabled)
             self.gold = {}
-            connected_players = list(self.clients.keys())
 
             if self.game_mode == "2v2":
                 team_counts = {
@@ -299,10 +378,6 @@ class Server:
             else:
                 for p in connected_players:
                     self.gold[p] = self.starting_gold
-                    if len(connected_players) == 3 and self.game_mode == "2v2":
-                        self.gold[p] = int(self.starting_gold * 2.2)
-                    else:
-                        self.gold[p] = self.starting_gold
             self.ready = {p: False for p in connected_players}
 
             self.broadcast({
@@ -590,12 +665,13 @@ class Server:
                     attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                     target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
                     bonus_dmg = int(max(0, attacker_h - target_h) * 15)
+                    in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Knight":
                         archer_range = u["radius"] * 20.0
                         projectile_life = max(1, int(archer_range / 11.0))
 
-                        if not u["is_moving"] and e_dist < archer_range and can_see and now - u["last_attack"] > 2.0:
+                        if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 2.0:
                             u["last_attack"] = now
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                             u["angle"] = base_ang
@@ -606,7 +682,7 @@ class Server:
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
                     elif u["type"] == "Healer":
                         heal_range = (u["radius"] + target["radius"] + 10)
-                        if e_dist < heal_range and now - u["last_attack"] > 0.8:
+                        if e_dist < heal_range and in_front and now - u["last_attack"] > 0.8:
                             u["last_attack"] = now
                             target["hp"] = min(target["max_hp"], target["hp"] + 15)
                             target["is_hit"] = True
@@ -616,11 +692,16 @@ class Server:
                         cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
                         damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
 
-                        if e_dist < attack_range and can_see and now - u["last_attack"] > cooldown:
+                        # NEW:
+                        if e_dist < attack_range and can_see and in_front and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
                             target["hp"] -= (damage_val + bonus_dmg)
-                            target["is_hit"] = True
+                            target["is_hit"] = True  # Visually shows unit being hit
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
+
+                            # Only award score if this specific hit kills the unit
+                            if target["hp"] <= 0:
+                                self.award_kill_score(u["owner"], target["type"])
 
             alive_projectiles = []
             for p in self.projectiles:
@@ -629,13 +710,19 @@ class Server:
                 p["life"] -= 1
                 hit = False
 
+                # NEW:
                 for u in self.units:
-                    if self.is_enemy(u["owner"], p["owner"]):
+                    if u["hp"] > 0 and self.is_enemy(u["owner"], p["owner"]):
                         if math.hypot(u["x"] - p["x"], u["y"] - p["y"]) < (u["radius"] + 2):
                             u["hp"] -= p["damage"]
-                            u["is_hit"] = True
+                            u["is_hit"] = True  # Register unit hit
                             hit = True
+
+                            # Only award kill score if the projectile deal final lethal damage
+                            if u["hp"] <= 0:
+                                self.award_kill_score(p["owner"], u["type"])
                             break
+
                 if not hit and p["life"] > 0:
                     alive_projectiles.append(p)
 
@@ -648,24 +735,39 @@ class Server:
                     team = (u["owner"] % 2) if self.game_mode == "2v2" else u["owner"]
                     alive_teams.add(team)
 
-            if len(alive_teams) <= 1:
-                winner_team = list(alive_teams)[0] if alive_teams else -1
-                if winner_team != -1:
-                    if self.game_mode == "2v2":
-                        for p in self.scores.keys():
-                            if (p % 2) == winner_team:
-                                self.scores[p] += 1
-                    else:
-                        self.scores[winner_team] += 1
+            match_winner = None
+            match_over = False
 
+            if self.win_condition == "MOST_SCORE_AT_END":
+                for p, k_score in self.kills.items():
+                    if k_score >= self.target_score:
+                        match_winner = (p % 2) if self.game_mode == "2v2" else p
+                        match_over = True
+                        break
+
+            if not match_over and len(alive_teams) <= 1:
+                round_winner = list(alive_teams)[0] if alive_teams else -1
+                if round_winner != -1:
+                    match_winner = round_winner
+                    match_over = True
+
+            if match_over:
+                self.award_win(match_winner)
                 self.state = "LOBBY"
-                self.broadcast({"type": "GAME_OVER", "winner": winner_team, "scores": self.scores})
+                self.broadcast({
+                    "type": "GAME_OVER",
+                    "winner": match_winner,
+                    "scores": self.scores,
+                    "kills": self.kills,
+                    "win_condition": self.win_condition
+                })
             else:
                 self.broadcast({
                     "type": "GAME_UPDATE",
                     "units": self.units,
                     "projectiles": self.projectiles,
-                    "water_level": self.water_level
+                    "water_level": self.water_level,
+                    "kills": self.kills
                 })
 
     def run(self):

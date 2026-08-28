@@ -71,11 +71,12 @@ def play_pitched_melee(unit_type):
     MELEE_SOUND.set_volume(min(1.0, vol))
     MELEE_SOUND.play()
 
-WIDTH, HEIGHT = 800, 600
+WIDTH, HEIGHT = 950, 600
 SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Realtime-Chess Client")
 FONT = pygame.font.SysFont("Arial", 14, bold=True)
-BIG_FONT = pygame.font.SysFont("Arial", 20, bold=True)
+BIG_FONT = pygame.font.SysFont("Arial", 18, bold=True)
+TITLE_FONT = pygame.font.SysFont("Arial", 22, bold=True)
 
 SHOP_ITEMS = [
     ("Pawn", 100),
@@ -98,6 +99,8 @@ class ClientApp:
         self.ip_input = "127.0.0.1"
         self.player_id = None
         self.scores = {}
+        self.kills = {}
+        self.usernames = {}
         self.board_size = 24
         self.heightmap = []
         self.water_level = -0.5
@@ -241,14 +244,19 @@ class ClientApp:
         if mtype == "INIT":
             self.player_id = msg["player_id"]
             self.scores = {int(k): v for k, v in msg["scores"].items()}
+            self.kills = {int(k): v for k, v in msg.get("kills", {}).items()}
+            self.usernames = {int(k): v for k, v in msg.get("usernames", {}).items()}
             self.board_size = msg["board_size"]
             self.heightmap = msg.get("heightmap", [])
             self.water_level = msg.get("water_level", -0.5)
             self.starting_gold = msg["starting_gold"]
             self.game_mode = msg.get("game_mode", "FFA")
             self.update_default_zoom()
+        elif mtype == "USERNAMES_UPDATE":
+            self.usernames = {int(k): v for k, v in msg["usernames"].items()}
         elif mtype == "PLAYER_DISCONNECT":
             self.scores = {int(k): v for k, v in msg["scores"].items()}
+            self.kills = {int(k): v for k, v in msg.get("kills", {}).items()}
             self.game_state = "LOBBY"
             self.state = "CONNECTED"
             self.units = []
@@ -310,6 +318,8 @@ class ClientApp:
             self.units = msg["units"]
             self.projectiles = msg.get("projectiles", [])
             self.water_level = msg.get("water_level", self.water_level)
+            if "kills" in msg:
+                self.kills = {int(k): v for k, v in msg["kills"].items()}
 
             moving_count = 0
             for u in self.units:
@@ -325,12 +335,15 @@ class ClientApp:
                 self.footstep_index = 1 - self.footstep_index
         elif mtype == "GAME_OVER":
             self.scores = {int(k): v for k, v in msg["scores"].items()}
+            if "kills" in msg:
+                self.kills = {int(k): v for k, v in msg["kills"].items()}
             self.game_state = "LOBBY"
             winner = msg['winner']
             if self.game_mode == "2v2":
-                self.chat_messages.append(f"System: Team {winner + 1} won the round!")
+                self.chat_messages.append(f"System: Team {winner + 1} won!")
             else:
-                self.chat_messages.append(f"System: Player {winner + 1} won the round!")
+                pname = self.usernames.get(winner, f"Player {winner + 1}")
+                self.chat_messages.append(f"System: {pname} won!")
 
     def send(self, data):
         if self.sock:
@@ -368,7 +381,7 @@ class ClientApp:
     def draw_menu(self):
         SCREEN.fill((25, 25, 30))
         mx, my = pygame.mouse.get_pos()
-        t = BIG_FONT.render("Realtime Chess - Main Menu", True, (255, 255, 255))
+        t = TITLE_FONT.render("Realtime Chess - Main Menu", True, (255, 255, 255))
         SCREEN.blit(t, (WIDTH // 2 - t.get_width() // 2, 140))
 
         host_rect = pygame.Rect(WIDTH // 2 - 100, 210, 200, 40)
@@ -430,17 +443,17 @@ class ClientApp:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             mx, my = event.pos
             for i, (name, cost) in enumerate(SHOP_ITEMS):
-                if pygame.Rect(10 + i * 110, 550, 105, 38).collidepoint(mx, my):
+                if pygame.Rect(260 + i * 105, 550, 100, 38).collidepoint(mx, my):
                     self.send({"type": "BUY_UNIT", "unit_type": name})
                     break
-            if pygame.Rect(680, 550, 110, 38).collidepoint(mx, my):
+            if pygame.Rect(820, 550, 110, 38).collidepoint(mx, my):
                 self.send({"type": "READY_SHOP"})
 
     def handle_game_events(self, event):
         self.handle_common_board_events(event)
         if event.type == pygame.MOUSEBUTTONDOWN:
             smx, smy = event.pos
-            if smy > 40:
+            if smx > 250 and smy > 40:
                 wmx, wmy = self.to_world_coords(smx, smy)
                 if event.button == 1:
                     self.drag_start = (smx, smy)
@@ -470,7 +483,7 @@ class ClientApp:
                         })
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.drag_start:
             smx, smy = event.pos
-            if self.drag_start[1] > 40 and smy > 40:
+            if self.drag_start[0] > 250 and smx > 250 and self.drag_start[1] > 40 and smy > 40:
                 sx1, sx2 = min(self.drag_start[0], smx), max(self.drag_start[0], smx)
                 sy1, sy2 = min(self.drag_start[1], smy), max(self.drag_start[1], smy)
                 if abs(sx2 - sx1) > 5 or abs(sy2 - sy1) > 5:
@@ -505,7 +518,7 @@ class ClientApp:
         elif self.player_id == 3: rwx, rwy = cx - (wy_before - cy), cy + (wx_before - cx)
         else:                     rwx, rwy = wx_before, wy_before
 
-        local_sx = mouse_pos[0] - 150
+        local_sx = mouse_pos[0] - 260
         local_sy = mouse_pos[1] - 40
         self.camera_x = rwx - (local_sx / scale)
         self.camera_y = rwy - (local_sy / scale)
@@ -526,12 +539,12 @@ class ClientApp:
         local_x = (rwx - self.camera_x) * scale
         local_y = (rwy - self.camera_y) * scale
 
-        return 150 + local_x, 40 + local_y
+        return 260 + local_x, 40 + local_y
 
     def to_world_coords(self, sx, sy):
         board_render_size = 500.0
         scale = self.zoom * (board_render_size / WORLD_SIZE)
-        rwx = ((sx - 150) / scale) + self.camera_x
+        rwx = ((sx - 260) / scale) + self.camera_x
         rwy = ((sy - 40) / scale) + self.camera_y
 
         cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
@@ -549,7 +562,7 @@ class ClientApp:
         return angle + rot
 
     def draw_board(self):
-        board_rect = pygame.Rect(150, 40, 500, 500)
+        board_rect = pygame.Rect(260, 40, 500, 500)
         SCREEN.set_clip(board_rect)
 
         ts_world = WORLD_SIZE / float(self.board_size)
@@ -562,17 +575,24 @@ class ClientApp:
                     h = self.heightmap[r][c]
                     if h <= self.water_level:
                         color = (40, 120, 220)
-                    elif h > 0.6:
-                        # High points turn into a stony gray color palette
-                        stone_val = max(110, min(190, int(110 + (h - 0.6) * 160)))
-                        color = (stone_val, stone_val, stone_val + 10)
                     else:
-                        # Shaded green levels to distinctly indicate hill contour and high points
-                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (0.6 - self.water_level)))
-                        red_val = int(25 + norm_h * 75)
-                        green_val = int(105 + norm_h * 135)
-                        blue_val = int(30 + norm_h * 45)
-                        color = (red_val, min(255, green_val), blue_val)
+                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (1.5 - self.water_level)))
+
+                        red_grass = int(25 + norm_h * 75)
+                        green_grass = int(105 + norm_h * 135)
+                        blue_grass = int(30 + norm_h * 45)
+
+                        stone_val = max(110, min(200, int(110 + norm_h * 90)))
+                        mountain_color = (stone_val, stone_val, stone_val + 10)
+
+                        blend = max(0.0, min(1.0, (h - 0.45) / 0.30))
+                        smooth_blend = blend * blend * (3 - 2 * blend)
+
+                        r_col = int(red_grass * (1 - smooth_blend) + mountain_color[0] * smooth_blend)
+                        g_col = int(min(255, green_grass) * (1 - smooth_blend) + mountain_color[1] * smooth_blend)
+                        b_col = int(blue_grass * (1 - smooth_blend) + mountain_color[2] * smooth_blend)
+
+                        color = (r_col, g_col, b_col)
                 else:
                     color = (105, 185, 85)
 
@@ -581,7 +601,7 @@ class ClientApp:
                 sx, sy = self.to_screen_coords(wx, wy)
 
                 margin = rect_size
-                if sx < 150 - margin or sx > 650 + margin or sy < 40 - margin or sy > 540 + margin:
+                if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
                     continue
 
                 rect = pygame.Rect(0, 0, rect_size, rect_size)
@@ -591,7 +611,7 @@ class ClientApp:
         SCREEN.set_clip(None)
 
     def draw_units_and_projectiles(self):
-        board_rect = pygame.Rect(150, 40, 500, 500)
+        board_rect = pygame.Rect(260, 40, 500, 500)
         SCREEN.set_clip(board_rect)
 
         for p in self.projectiles:
@@ -650,7 +670,53 @@ class ClientApp:
             end_y = sy + math.sin(s_angle) * stick_length
             pygame.draw.line(SCREEN, (0, 0, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
 
+            if u["type"] == "King":
+                p_name = self.usernames.get(u["owner"], f"Player {u['owner'] + 1}")
+                tag_surf = FONT.render(f"👑 {p_name}", True, (255, 255, 255))
+                bg_rect = pygame.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
+                bg_rect.center = (int(sx), int(sy) - draw_radius - 18)
+                pygame.draw.rect(SCREEN, (0, 0, 0, 180), bg_rect, border_radius=3)
+                pygame.draw.rect(SCREEN, color, bg_rect, width=1, border_radius=3)
+                SCREEN.blit(tag_surf, (bg_rect.x + 4, bg_rect.y + 2))
+
         SCREEN.set_clip(None)
+
+    def draw_sidebar(self):
+        sidebar_rect = pygame.Rect(0, 0, 250, HEIGHT)
+        pygame.draw.rect(SCREEN, (20, 22, 28), sidebar_rect)
+        pygame.draw.line(SCREEN, (50, 55, 65), (250, 0), (250, HEIGHT), 2)
+
+        stitle = TITLE_FONT.render("SCOREBOARD", True, (240, 240, 240))
+        SCREEN.blit(stitle, (20, 15))
+
+        mode_str = f"Mode: {self.game_mode}"
+        win_str = "Win: LAST_MAN_STANDING"
+
+        SCREEN.blit(FONT.render(mode_str, True, (160, 160, 170)), (20, 45))
+        SCREEN.blit(FONT.render(win_str, True, (160, 160, 170)), (20, 65))
+
+        pygame.draw.line(SCREEN, (40, 45, 55), (15, 90), (235, 90), 1)
+
+        y_offset = 105
+        for p_id in sorted(self.scores.keys()):
+            p_color = self.get_player_color(p_id)
+            p_name = self.usernames.get(p_id, f"Player {p_id + 1}")
+            p_wins = self.scores.get(p_id, 0)
+            p_kills = self.kills.get(p_id, 0)
+
+            card_rect = pygame.Rect(15, y_offset, 220, 50)
+            bg_col = (35, 38, 48) if p_id == self.player_id else (26, 28, 35)
+            pygame.draw.rect(SCREEN, bg_col, card_rect, border_radius=5)
+            pygame.draw.rect(SCREEN, p_color, card_rect, width=2, border_radius=5)
+
+            team_lbl = f" [T{p_id % 2 + 1}]" if self.game_mode == "2v2" else ""
+            name_txt = FONT.render(f"{p_name}{team_lbl}", True, (255, 255, 255))
+            stats_txt = FONT.render(f"Wins:{p_wins} | Kills:{p_kills}", True, (255, 215, 0))
+
+            SCREEN.blit(name_txt, (25, y_offset + 8))
+            SCREEN.blit(stats_txt, (25, y_offset + 28))
+
+            y_offset += 60
 
     def draw_minimap(self):
         if not self.show_minimap: return
@@ -680,11 +746,19 @@ class ClientApp:
         pygame.draw.rect(SCREEN, (255, 255, 255), (vx, vy, vw, vh), 1)
 
     def draw_lobby(self):
-        title = BIG_FONT.render("Realtime-Chess Waiting Room", True, (255, 255, 255))
+        SCREEN.fill((30, 30, 35))
+        title = TITLE_FONT.render("Realtime-Chess Waiting Room", True, (255, 255, 255))
         SCREEN.blit(title, (40, 15))
-        score_str = " | ".join([f"P{k+1}: {v}" for k, v in sorted(self.scores.items())])
-        score_txt = FONT.render(f"Scores - {score_str}", True, (200, 200, 200))
-        SCREEN.blit(score_txt, (40, 40))
+
+        score_parts = []
+        for k in sorted(self.scores.keys()):
+            p_name = self.usernames.get(k, f"P{k+1}")
+            score_parts.append(f"{p_name}: {self.scores.get(k, 0)}W/{self.kills.get(k, 0)}K")
+        score_str = " | ".join(score_parts)
+        score_txt = FONT.render(f"Stats (Wins/Kills) - {score_str}", True, (200, 200, 200))
+        SCREEN.blit(score_txt, (40, 42))
+
+        pygame.draw.rect(SCREEN, (30, 30, 35), (40, 65, 870, 25))
 
         settings_txt = FONT.render(f"Mode: {self.game_mode} (M) | Size: {self.board_size} (UP/DN) | Gold: ${self.starting_gold} (L/R) | Water: {self.water_rising} (W)", True, (200, 220, 100))
         SCREEN.blit(settings_txt, (40, 65))
@@ -692,33 +766,40 @@ class ClientApp:
         start_txt = FONT.render("Press SPACE to Start (Host Only)", True, (100, 255, 100))
         SCREEN.blit(start_txt, (40, 95))
 
-        pygame.draw.rect(SCREEN, (20, 20, 25), (40, 130, 720, 400))
-        for i, msg in enumerate(self.chat_messages[-15:]):
+        pygame.draw.rect(SCREEN, (20, 20, 25), (40, 130, 870, 440))
+        for i, msg in enumerate(self.chat_messages[-16:]):
             SCREEN.blit(FONT.render(msg, True, (220, 220, 220)), (50, 140 + i * 22))
 
     def draw_shop(self):
+        self.draw_sidebar()
         self.draw_board()
         self.draw_units_and_projectiles()
         self.draw_minimap()
 
-        hdr = pygame.Surface((WIDTH, 40))
+        hdr = pygame.Surface((WIDTH - 250, 40))
         hdr.fill((15, 15, 20))
-        SCREEN.blit(hdr, (0, 0))
-        SCREEN.blit(BIG_FONT.render(f"Buy Phase - Gold: ${self.gold}", True, (255, 215, 0)), (15, 8))
+        SCREEN.blit(hdr, (250, 0))
+        SCREEN.blit(TITLE_FONT.render(f"Buy Phase - Gold: ${self.gold}", True, (255, 215, 0)), (265, 8))
+
         for i, (name, cost) in enumerate(SHOP_ITEMS):
-            rect = pygame.Rect(10 + i * 110, 550, 105, 38)
+            rect = pygame.Rect(260 + i * 105, 550, 100, 38)
             pygame.draw.rect(SCREEN, (50, 50, 75), rect, border_radius=4)
-            SCREEN.blit(FONT.render(f"+ {name} (${cost})", True, (255, 255, 255)), (rect.x + 4, rect.y + 10))
-        ready_rect = pygame.Rect(680, 550, 110, 38)
+            SCREEN.blit(FONT.render(f"+ {name}", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
+            SCREEN.blit(FONT.render(f"${cost}", True, (255, 215, 0)), (rect.x + 4, rect.y + 20))
+
+        ready_rect = pygame.Rect(820, 550, 110, 38)
         pygame.draw.rect(SCREEN, (0, 180, 0) if self.ready_map.get(self.player_id, False) else (190, 40, 40), ready_rect, border_radius=4)
         SCREEN.blit(BIG_FONT.render("READY", True, (255, 255, 255)), (ready_rect.x + 25, ready_rect.y + 7))
 
     def draw_game(self):
-        header = pygame.Surface((WIDTH, 40))
+        self.draw_sidebar()
+
+        header = pygame.Surface((WIDTH - 250, 40))
         header.fill((15, 15, 20))
-        SCREEN.blit(header, (0, 0))
-        score_str = " | ".join([f"P{k+1}: {v}" for k, v in sorted(self.scores.items())])
-        SCREEN.blit(FONT.render(f"[{self.game_mode}] {score_str} | Playing as Player {self.player_id + 1} | Zoom: {self.zoom:.2f}x (Scroll/+/-)", True, (255, 255, 255)), (15, 12))
+        SCREEN.blit(header, (250, 0))
+
+        pname = self.usernames.get(self.player_id, f"Player {self.player_id + 1}")
+        SCREEN.blit(FONT.render(f"Playing as: {pname} | Zoom: {self.zoom:.2f}x (Scroll/+/-)", True, (255, 255, 255)), (265, 12))
 
         self.draw_board()
         self.draw_units_and_projectiles()
@@ -727,7 +808,7 @@ class ClientApp:
         if self.drag_start:
             mx, my = pygame.mouse.get_pos()
             start_x, start_y = self.drag_start
-            if start_y > 40 and my > 40:
+            if start_x > 250 and mx > 250 and start_y > 40 and my > 40:
                 rect_x, rect_y = min(start_x, mx), min(start_y, my)
                 rect_w, rect_h = abs(mx - start_x), abs(my - start_y)
                 pygame.draw.rect(SCREEN, (0, 255, 0), (rect_x, rect_y, rect_w, rect_h), 1)
