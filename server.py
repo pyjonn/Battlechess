@@ -232,7 +232,7 @@ class Server:
             self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled})
 
         elif mtype == "SET_STARTING_GOLD" and pid == 0 and self.state == "LOBBY":
-            self.starting_gold = max(100, min(5000, msg["starting_gold"]))
+            self.starting_gold = max(100, min(10000, msg["starting_gold"]))
             self.broadcast({"type": "GOLD_SETTING_UPDATE", "starting_gold": self.starting_gold})
 
         elif mtype == "TOGGLE_MODE" and pid == 0 and self.state == "LOBBY":
