@@ -404,7 +404,7 @@ class ClientApp:
             elif event.key == pygame.K_DOWN and self.player_id == 0:
                 self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
             elif event.key == pygame.K_RIGHT and self.player_id == 0:
-                self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(5000, self.starting_gold + 100)})
+                self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(10000, self.starting_gold + 100)})
             elif event.key == pygame.K_LEFT and self.player_id == 0:
                 self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
             elif event.key == pygame.K_w and self.player_id == 0:
