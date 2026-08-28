@@ -1,3 +1,4 @@
+# server.py
 import socket
 import threading
 import json
@@ -26,11 +27,6 @@ def setup_logging(verbose):
     console_handler.setFormatter(logging.Formatter(log_format))
     logger.addHandler(console_handler)
 
-    file_handler = logging.FileHandler("server.log")
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(logging.Formatter(log_format))
-    logger.addHandler(file_handler)
-
 def generate_noise_grid(grid_w, grid_h):
     return [[random.uniform(-1.0, 1.0) for _ in range(grid_h + 1)] for _ in range(grid_w + 1)]
 
@@ -38,7 +34,6 @@ def sample_smooth_noise(grid, x, y):
     gx, gy = int(x), int(y)
     fx, fy = x - gx, y - gy
 
-    # Smooth Interpolation (fade curve)
     fade = lambda t: t * t * (3 - 2 * t)
     sx, sy = fade(fx), fade(fy)
 
@@ -55,7 +50,6 @@ def generate_heightmap(size, water_enabled, units=None):
     logging.debug(f"Generating randomized heightmap for size {size}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
 
-    # Generate random gradient grids for multiple octaves
     octave1 = generate_noise_grid(4, 4)
     octave2 = generate_noise_grid(8, 8)
     octave3 = generate_noise_grid(16, 16)
@@ -66,8 +60,6 @@ def generate_heightmap(size, water_enabled, units=None):
     for r in range(size):
         for c in range(size):
             nx, ny = c / float(size), r / float(size)
-
-            # Combine octaves for natural terrain fractal noise
             val1 = sample_smooth_noise(octave1, nx * 4, ny * 4) * 1.0
             val2 = sample_smooth_noise(octave2, nx * 8, ny * 8) * 0.5
             val3 = sample_smooth_noise(octave3, nx * 16, ny * 16) * 0.25
@@ -75,55 +67,40 @@ def generate_heightmap(size, water_enabled, units=None):
             elevation = val1 + val2 + val3
 
             if water_enabled:
-                # Add slight center valley bias for dynamic water pools
                 dist_center = math.hypot(c - cx, r - cy) / (size * 0.5)
                 elevation -= max(0.0, 0.4 - dist_center * 0.3)
 
             grid[r][c] = round(elevation, 2)
 
-    # Force land around starting King positions and existing unit positions
-    # Ensure random generation provides land at the starting positions
     if units is not None:
-        protected_positions = [(u["x"], u["y"]) for u in units]
+        protected_positions = [(u["x"], u["y"]) for u in units if u["type"] == "King"]
     else:
-        # Top-middle and bottom-middle starting positions
-        protected_positions = [(400, 120), (400, 680)]
+        protected_positions = [(400, 120), (400, 680), (120, 400), (680, 400)]
 
     for wx, wy in protected_positions:
         center_c = int(wx / tile_pixel_size)
         center_r = int(wy / tile_pixel_size)
-
-        # Wide radius for an unnoticeable transition
         island_radius = 12.0
-        target_land_height = 0.2  # Safely above the -0.1 water level
+        target_land_height = 0.2
 
         for r in range(max(0, int(center_r - island_radius)), min(size, int(center_r + island_radius + 1))):
             for c in range(max(0, int(center_c - island_radius)), min(size, int(center_c + island_radius + 1))):
                 dist = math.hypot(c - center_c, r - center_r)
-
                 if dist <= island_radius:
                     blend = dist / island_radius
                     smooth = blend * blend * (3 - 2 * blend)
-
                     original_h = grid[r][c]
-
-                    # Only modify the terrain if it generated underwater or too low
                     if original_h < target_land_height:
-                        # Blend the low terrain up to the target land height at the center
                         boosted_h = (target_land_height * (1.0 - smooth)) + (original_h * smooth)
-
-                        # Use max() to ensure we never accidentally flatten existing mountains
                         grid[r][c] = max(original_h, boosted_h)
     return grid
 
 def get_height_at_pos(wx, wy, heightmap, board_size):
     if not heightmap:
         return 0.0
-
     tile_size = 800.0 / board_size
     c = max(0, min(board_size - 1, int(wx / tile_size)))
     r = max(0, min(board_size - 1, int(wy / tile_size)))
-
     return heightmap[r][c]
 
 def has_cone_vision(viewer, target_x, target_y):
@@ -153,17 +130,17 @@ class Server:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((HOST, PORT))
-        self.sock.listen(2)
-        self.usernames = {0: "Player 1", 1: "Player 2"}
+        self.sock.listen(4)
+        self.usernames = {i: f"Player {i+1}" for i in range(4)}
 
         self.clients = {}
-        self.scores = {0: 0, 1: 0}
+        self.scores = {i: 0 for i in range(4)}
         self.board_size = 32
         self.fog_enabled = False
         self.water_rising_enabled = False
         self.water_enabled = True
+        self.game_mode = "FFA"
 
-        # Initialize units list before generate_heightmap is called
         self.units = []
         self.projectiles = []
 
@@ -172,8 +149,8 @@ class Server:
 
         self.starting_gold = 2000
         self.state = "LOBBY"
-        self.gold = {0: self.starting_gold, 1: self.starting_gold}
-        self.ready = {0: False, 1: False}
+        self.gold = {}
+        self.ready = {}
         self.next_unit_id = 1
         self.lock = threading.Lock()
         logging.info(f"Server initialized successfully on board size {self.board_size}x{self.board_size}")
@@ -189,20 +166,17 @@ class Server:
                     if player_id in self.clients:
                         del self.clients[player_id]
 
-                    if self.state != "LOBBY":
-                        self.state = "LOBBY"
-                        winner_id = 1 - player_id
-                        self.scores[winner_id] += 1
-                        logging.warning(f"Player {player_id} dropped mid-game. Awarding win to Player {winner_id}")
-
-                        try:
-                            conn.sendall((json.dumps({
-                                "type": "PLAYER_DISCONNECT",
-                                "disconnected_id": player_id,
-                                "scores": self.scores
-                            }) + "\n").encode('utf-8'))
-                        except:
-                            pass
+                    self.state = "LOBBY"
+                    self.units = []
+                    logging.warning(f"Player {player_id} dropped mid-game. Ending match.")
+                    try:
+                        conn.sendall((json.dumps({
+                            "type": "PLAYER_DISCONNECT",
+                            "disconnected_id": player_id,
+                            "scores": self.scores
+                        }) + "\n").encode('utf-8'))
+                    except:
+                        pass
 
     def handle_client(self, player_id, conn):
         logging.info(f"Handling connection for Player {player_id}")
@@ -213,7 +187,8 @@ class Server:
             "board_size": self.board_size,
             "heightmap": self.heightmap,
             "water_level": self.water_level,
-            "starting_gold": self.starting_gold
+            "starting_gold": self.starting_gold,
+            "game_mode": self.game_mode
         }) + "\n").encode('utf-8'))
 
         buffer = ""
@@ -238,77 +213,63 @@ class Server:
 
     def process_message(self, pid, msg):
         mtype = msg.get("type")
-        logging.debug(f"Processing message type '{mtype}' from Player {pid}")
-
         if mtype == "SET_NAME":
             name = msg.get("username", f"Player {pid + 1}").strip()
             if name:
                 self.usernames[pid] = name
-                logging.info(f"Player {pid} set username to '{name}'")
                 self.broadcast({"type": "CHAT", "sender": "System", "text": f"{name} joined the game!"})
 
         elif mtype == "CHAT":
             sender_name = self.usernames.get(pid, f"Player {pid + 1}")
-            logging.info(f"Chat from {sender_name}: {msg['text']}")
             self.broadcast({"type": "CHAT", "sender": sender_name, "text": msg["text"]})
 
         elif mtype == "SET_BOARD_SIZE" and pid == 0 and self.state == "LOBBY":
-            # Higher max board size limit raised to 128
             self.board_size = max(12, min(128, msg["size"]))
-            logging.info(f"Host updated board size to {self.board_size}")
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
             self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
 
         elif mtype == "SET_WATER_RISING" and pid == 0 and self.state == "LOBBY":
             self.water_rising_enabled = msg["rising"]
-            logging.info(f"Host set water rising to: {self.water_rising_enabled}")
             self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled})
 
         elif mtype == "SET_STARTING_GOLD" and pid == 0 and self.state == "LOBBY":
-            self.starting_gold = max(500, min(5000, msg["starting_gold"]))
-            self.gold = {0: self.starting_gold, 1: self.starting_gold}
-            logging.info(f"Host set starting gold to: {self.starting_gold}")
+            self.starting_gold = max(100, min(5000, msg["starting_gold"]))
             self.broadcast({"type": "GOLD_SETTING_UPDATE", "starting_gold": self.starting_gold})
 
-        elif mtype == "TOGGLE_FOG" and pid == 0:
-            self.fog_enabled = msg["fog"]
-            logging.info(f"Host toggled fog: {self.fog_enabled}")
-            self.broadcast({"type": "SETTINGS_UPDATE", "fog": self.fog_enabled, "water": self.water_enabled})
-
-        elif mtype == "TOGGLE_WATER" and pid == 0:
-            self.water_enabled = msg["water"]
-            logging.info(f"Host toggled water: {self.water_enabled}")
-            self.heightmap = generate_heightmap(self.board_size, self.water_enabled)
-            self.broadcast({
-                "type": "SETTINGS_UPDATE",
-                "fog": self.fog_enabled,
-                "water": self.water_enabled,
-                "heightmap": self.heightmap
-            })
+        elif mtype == "TOGGLE_MODE" and pid == 0 and self.state == "LOBBY":
+            self.game_mode = "2v2" if self.game_mode == "FFA" else "FFA"
+            self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode})
 
         elif mtype == "START_GAME" and pid == 0 and self.state == "LOBBY":
-            logging.info("Host started the game. Generating fresh terrain & entering SHOP phase.")
+            logging.info("Host started the game. Transitioning to SHOP phase.")
             self.state = "SHOP"
             self.water_level = -0.1 if self.water_enabled else -99.0
             self.units = []
 
             tile_pixel_size = 800.0 / self.board_size
             four_block_radius = int(2.0 * tile_pixel_size) / 2
-            for p in [0, 1]:
-                king_x = 400
-                king_y = 120 if p == 0 else 680
+            king_positions = {
+                0: (400, 120, math.pi/2),
+                1: (400, 680, 3*math.pi/2),
+                2: (120, 400, 0.0),
+                3: (680, 400, math.pi)
+            }
+
+            connected_players = list(self.clients.keys())
+            for p in connected_players:
+                kx, ky, kang = king_positions.get(p, (400, 400, 0.0))
                 self.units.append({
                     "id": self.next_unit_id,
                     "owner": p,
                     "type": "King",
                     "shape": "octagon",
-                    "x": king_x,
-                    "y": king_y,
-                    "target_x": king_x,
-                    "target_y": king_y,
+                    "x": kx,
+                    "y": ky,
+                    "target_x": kx,
+                    "target_y": ky,
                     "hp": 300,
                     "max_hp": 300,
-                    "angle": 0.0 if p == 0 else math.pi,
+                    "angle": kang,
                     "is_moving": False,
                     "is_hit": False,
                     "last_attack": 0,
@@ -320,11 +281,10 @@ class Server:
                 })
                 self.next_unit_id += 1
 
-            # Generate heightmap after spawn locations exist
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units)
+            self.gold = {p: self.starting_gold for p in connected_players}
+            self.ready = {p: False for p in connected_players}
 
-            self.gold = {0: self.starting_gold, 1: self.starting_gold}
-            self.ready = {0: False, 1: False}
             self.broadcast({
                 "type": "SHOP_START",
                 "board_size": self.board_size,
@@ -339,57 +299,61 @@ class Server:
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
-            if self.gold[pid] >= cost:
+            if self.gold.get(pid, 0) >= cost:
                 self.gold[pid] -= cost
-                logging.info(f"Player {pid} bought {utype} for ${cost}. Remaining gold: ${self.gold[pid]}")
-
-                # Locate the player's King
                 king = next((u for u in self.units if u["owner"] == pid and u["type"] == "King"), None)
-                center_x = king["x"] if king else 400
-                center_y = king["y"] if king else (120 if pid == 0 else 680)
+                king_positions = {0: (400, 120), 1: (400, 680), 2: (120, 400), 3: (680, 400)}
+                center_x = king["x"] if king else king_positions.get(pid, (400, 400))[0]
+                center_y = king["y"] if king else king_positions.get(pid, (400, 400))[1]
 
                 tile_pixel_size = 800.0 / self.board_size
                 four_block_radius = int(2.0 * tile_pixel_size) / 2
-
-                # Minimum spacing required between this new unit and existing units
-                min_spacing = tile_pixel_size * 2.5
-
                 spawn_x, spawn_y = center_x, center_y
-                search_radius = 25.0
+                search_radius = 10.0
                 found_spot = False
 
-                # Search outward in expanding rings
-                while search_radius < 400 and not found_spot:
-                    steps = max(8, int(search_radius / 5))
-
+                while search_radius < 800 and not found_spot:
+                    steps = max(12, int(search_radius / 4))
                     for i in range(steps):
                         angle = (i / steps) * math.pi * 2
-                        cx = max(10, min(790, center_x + math.cos(angle) * search_radius))
-                        cy = max(10, min(790, center_y + math.sin(angle) * search_radius))
+                        cx = max(20, min(780, center_x + math.cos(angle) * search_radius))
+                        cy = max(20, min(780, center_y + math.sin(angle) * search_radius))
+                        terrain_height = get_height_at_pos(cx, cy, self.heightmap, self.board_size)
+                        if terrain_height <= self.water_level:
+                            continue
 
-                        # 1. Verify the spot is on dry land
-                        if get_height_at_pos(cx, cy, self.heightmap, self.board_size) > self.water_level:
-
-                            # 2. Verify the spot is not too close to any other unit
-                            too_close = False
-                            for u in self.units:
-                                if math.hypot(u["x"] - cx, u["y"] - cy) < min_spacing:
-                                    too_close = True
-                                    break
-
-                            if not too_close:
-                                spawn_x, spawn_y = cx, cy
-                                found_spot = True
+                        too_close = False
+                        for u in self.units:
+                            if math.hypot(u["x"] - cx, u["y"] - cy) <= (u["radius"] + four_block_radius + 0.1):
+                                too_close = True
                                 break
 
-                    search_radius += 15.0
+                        if not too_close:
+                            spawn_x, spawn_y = cx, cy
+                            found_spot = True
+                            break
+                    search_radius += 10.0
+
+                if not found_spot:
+                    valid_spots = []
+                    for r in range(self.board_size):
+                        for c in range(self.board_size):
+                            if self.heightmap[r][c] > self.water_level:
+                                vx = c * tile_pixel_size + (tile_pixel_size / 2)
+                                vy = r * tile_pixel_size + (tile_pixel_size / 2)
+                                valid_spots.append((vx, vy))
+
+                    if valid_spots:
+                        valid_spots.sort(key=lambda pos: math.hypot(pos[0] - center_x, pos[1] - center_y))
+                        spawn_x, spawn_y = valid_spots[0]
+                    else:
+                        spawn_x, spawn_y = center_x, center_y
 
                 shapes = {
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
                     "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
                 }
-                # ... [Keep the rest of the unit dictionary generation identical] ...
-                max_hps = {"Pawn": 100, "Knight": 10, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
+                max_hps = {"Pawn": 100, "Knight": 110, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
@@ -412,7 +376,7 @@ class Server:
                     "target_y": spawn_y,
                     "hp": max_hps[utype],
                     "max_hp": max_hps[utype],
-                    "angle": 0.0 if pid == 0 else math.pi,
+                    "angle": 0.0,
                     "is_moving": False,
                     "is_hit": False,
                     "last_attack": 0,
@@ -431,15 +395,12 @@ class Server:
                     "ready": self.ready,
                     "heightmap": self.heightmap
                 })
-                self.broadcast({"type": "SHOP_UPDATE", "units": self.units, "gold": self.gold, "ready": self.ready})
 
         elif mtype == "READY_SHOP" and self.state == "SHOP":
             self.ready[pid] = True
-            logging.info(f"Player {pid} is ready in shop.")
             self.broadcast({"type": "SHOP_UPDATE", "units": self.units, "gold": self.gold, "ready": self.ready})
             if all(self.ready.values()) or len(self.clients) == 1:
                 self.state = "IN_GAME"
-                logging.info("All players ready. Transitioning state to IN_GAME.")
                 self.broadcast({
                     "type": "GAME_START",
                     "units": self.units,
@@ -452,7 +413,6 @@ class Server:
             u_ids = msg.get("unit_ids", [])
             tx, ty = msg["target_pos"]
             t_unit = msg.get("target_unit")
-
             selected_group = [u for u in self.units if u["owner"] == pid and u["id"] in u_ids]
 
             if selected_group:
@@ -466,14 +426,17 @@ class Server:
                 else:
                     center_x = sum(u["x"] for u in selected_group) / len(selected_group)
                     center_y = sum(u["y"] for u in selected_group) / len(selected_group)
-
                     for u in selected_group:
                         offset_x = u["x"] - center_x
                         offset_y = u["y"] - center_y
-
                         u["target_x"] = tx + offset_x
                         u["target_y"] = ty + offset_y
                         u["target_unit"] = None
+
+    def is_enemy(self, owner1, owner2):
+        if self.game_mode == "2v2":
+            return (owner1 % 2) != (owner2 % 2)
+        return owner1 != owner2
 
     def game_loop(self):
         has_had_clients = False
@@ -483,9 +446,7 @@ class Server:
             with self.lock:
                 if len(self.clients) > 0:
                     has_had_clients = True
-
                 if has_had_clients and self.state != "LOBBY" and len(self.clients) == 0:
-                    logging.info("All clients disconnected. Shutting down server.")
                     os._exit(0)
 
             if self.state != "IN_GAME":
@@ -513,41 +474,34 @@ class Server:
                         u1["y"] -= ny * (overlap * 0.5)
                         u2["x"] += nx * (overlap * 0.5)
                         u2["y"] += ny * (overlap * 0.5)
+
             for u in self.units:
                 u["is_hit"] = False
-
                 target = None
 
-                # --- HEALER TARGETING ---
                 if u["type"] == "Healer":
-                    # 1. Try to find existing targeted friendly unit
                     if u.get("target_unit"):
-                        target = next((e for e in self.units if e["id"] == u["target_unit"] and e["owner"] == u["owner"]), None)
+                        target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
                         if not target:
                             u["target_unit"] = None
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    # 2. If no target, auto-acquire closest injured friendly unit
                     if not target and not u.get("target_unit"):
-                        friendlies = [e for e in self.units if e["owner"] == u["owner"] and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
+                        friendlies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"]) and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
                         if friendlies:
                             friendlies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
                             target = friendlies[0]
-
-                # --- COMBAT UNIT TARGETING ---
                 else:
-                    # 1. Try to find existing targeted enemy unit
                     if u.get("target_unit"):
-                        target = next((e for e in self.units if e["id"] == u["target_unit"] and e["owner"] != u["owner"]), None)
+                        target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
                         if not target:
                             u["target_unit"] = None
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    # 2. If no target, auto-acquire closest enemy unit
                     if not target and not u.get("target_unit"):
-                        enemies = [e for e in self.units if e["owner"] != u["owner"]]
+                        enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                         if enemies:
                             enemies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
                             target = enemies[0]
@@ -578,7 +532,6 @@ class Server:
 
                     step_x = (dx / dist) * speed
                     step_y = (dy / dist) * speed
-
                     u["x"] += step_x
                     u["y"] += step_y
                     u["vx"] = step_x
@@ -598,7 +551,6 @@ class Server:
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                     u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
-
                     e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                     can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
 
@@ -611,7 +563,6 @@ class Server:
                              u["last_attack"] = now
                              base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                              u["angle"] = base_ang
-
                              self.projectiles.append({
                                  "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.25, 0.25),
                                  "owner": u["owner"], "damage": 25 + bonus_dmg, "life": 40
@@ -643,34 +594,36 @@ class Server:
                 hit = False
 
                 for u in self.units:
-                    if u["owner"] != p["owner"]:
+                    if self.is_enemy(u["owner"], p["owner"]):
                         if math.hypot(u["x"] - p["x"], u["y"] - p["y"]) < (u["radius"] + 2):
                             u["hp"] -= p["damage"]
                             u["is_hit"] = True
                             hit = True
                             break
-
                 if not hit and p["life"] > 0:
                     alive_projectiles.append(p)
 
             self.projectiles = alive_projectiles
             self.units = [u for u in self.units if u["hp"] > 0]
 
-            p0_king = next((u for u in self.units if u["owner"] == 0 and u["type"] == "King"), None)
-            p1_king = next((u for u in self.units if u["owner"] == 1 and u["type"] == "King"), None)
+            alive_teams = set()
+            for u in self.units:
+                if u["type"] == "King":
+                    team = (u["owner"] % 2) if self.game_mode == "2v2" else u["owner"]
+                    alive_teams.add(team)
 
-            p0_defeated = p0_king is None
-            p1_defeated = p1_king is None
+            if len(alive_teams) <= 1:
+                winner_team = list(alive_teams)[0] if alive_teams else -1
+                if winner_team != -1:
+                    if self.game_mode == "2v2":
+                        for p in self.scores.keys():
+                            if (p % 2) == winner_team:
+                                self.scores[p] += 1
+                    else:
+                        self.scores[winner_team] += 1
 
-            if p0_defeated or p1_defeated:
-                winner = 1 if p0_defeated and not p1_defeated else 0
-                if p0_defeated and p1_defeated:
-                    winner = 1
-
-                self.scores[winner] += 1
                 self.state = "LOBBY"
-                logging.info(f"Game Over! Round won by Player {winner + 1}. Current scores: {self.scores}")
-                self.broadcast({"type": "GAME_OVER", "winner": winner, "scores": self.scores})
+                self.broadcast({"type": "GAME_OVER", "winner": winner_team, "scores": self.scores})
             else:
                 self.broadcast({
                     "type": "GAME_UPDATE",
@@ -682,19 +635,21 @@ class Server:
     def run(self):
         threading.Thread(target=self.game_loop, daemon=True).start()
         logging.info(f"Server started and listening on {HOST}:{PORT}")
-        current_id = 0
         while True:
             conn, addr = self.sock.accept()
             logging.info(f"New connection accepted from {addr}")
             with self.lock:
+                avail = [i for i in range(4) if i not in self.clients]
+                if not avail:
+                    conn.close()
+                    continue
+                current_id = avail[0]
                 self.clients[current_id] = conn
             threading.Thread(target=self.handle_client, args=(current_id, conn), daemon=True).start()
-            current_id = (current_id + 1) % 2
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Realtime Chess Game Server")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
     args = parser.parse_args()
-
     setup_logging(args.verbose)
     Server().run()

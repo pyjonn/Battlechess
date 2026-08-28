@@ -1,3 +1,4 @@
+# client.py
 import pygame
 import socket
 import threading
@@ -14,7 +15,6 @@ pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 pygame.mixer.set_num_channels(16)
 
-# Load and play background soundtrack on repeat
 try:
     pygame.mixer.music.load("soundtrack.ogg")
     pygame.mixer.music.set_volume(0.3)
@@ -78,7 +78,13 @@ pygame.display.set_caption("Realtime-Chess Client")
 FONT = pygame.font.SysFont("Arial", 14, bold=True)
 BIG_FONT = pygame.font.SysFont("Arial", 20, bold=True)
 
-PLAYER_COLORS = {0: (60, 120, 240), 1: (220, 60, 60)}
+PLAYER_COLORS = {
+    0: (60, 120, 240),  # Blue
+    1: (220, 60, 60),   # Red
+    2: (60, 220, 60),   # Green
+    3: (220, 220, 60)   # Yellow
+}
+
 SHOP_ITEMS = [
     ("Pawn", 100),
     ("Knight", 150),
@@ -88,7 +94,6 @@ SHOP_ITEMS = [
     ("Queen", 400)
 ]
 
-# Base world dimensions are 800x800
 WORLD_SIZE = 800.0
 
 class ClientApp:
@@ -97,20 +102,21 @@ class ClientApp:
         self.server_process = None
         self.sock = None
         self.username = "Player"
-        self.active_field = "username"  # 'username' or 'ip'
+        self.active_field = "username"
         self.ip_input = "127.0.0.1"
         self.player_id = None
-        self.scores = {0: 0, 1: 0}
+        self.scores = {}
         self.board_size = 24
         self.heightmap = []
         self.water_level = -0.5
         self.water_rising = False
         self.starting_gold = 2000
         self.game_state = "LOBBY"
+        self.game_mode = "FFA"
         self.units = []
         self.projectiles = []
         self.gold = 2000
-        self.ready_map = {0: False, 1: False}
+        self.ready_map = {}
         self.chat_messages = []
         self.chat_input = ""
         self.selected_units = set()
@@ -121,7 +127,6 @@ class ClientApp:
         self.fog_enabled = False
         self.water_enabled = False
 
-        # Camera and Zoom variables
         self.zoom = 1.0
         self.camera_x = 0.0
         self.camera_y = 0.0
@@ -132,47 +137,26 @@ class ClientApp:
         self.camera_x = 0.0
         self.camera_y = 0.0
 
-    def get_elevation(self, wx, wy):
-        if not self.heightmap:
-            return 0.0
-        c = max(0, min(self.board_size - 1, int(wx / (WORLD_SIZE / self.board_size))))
-        r = max(0, min(self.board_size - 1, int(wy / (WORLD_SIZE / self.board_size))))
-        return self.heightmap[r][c]
-
     def run(self):
         clock = pygame.time.Clock()
         while True:
             dt = clock.tick(60) / 1000.0
             self.anim_tick += 1
 
-            # Handle continuous keyboard panning (WASD) - Relative to screen direction
             if self.state == "CONNECTED" and self.game_state in ("SHOP", "IN_GAME"):
                 keys = pygame.key.get_pressed()
                 pan_speed = 400.0 * dt / self.zoom
                 max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
 
-                # Pressing W pans screen UP (map moves DOWN)
-                # Pressing S pans screen DOWN (map moves UP)
-                # Pressing A pans screen LEFT (map moves RIGHT)
-                # Pressing D pans screen RIGHT (map moves LEFT)
-                if self.player_id == 0:
-                    if keys[pygame.K_w] or keys[pygame.K_UP]:
-                        self.camera_y = min(max_cam, self.camera_y + pan_speed)
-                    if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-                        self.camera_y = max(0.0, self.camera_y - pan_speed)
-                    if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                        self.camera_x = min(max_cam, self.camera_x + pan_speed)
-                    if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                        self.camera_x = max(0.0, self.camera_x - pan_speed)
-                else:
-                    if keys[pygame.K_w] or keys[pygame.K_UP]:
-                        self.camera_y = max(0.0, self.camera_y - pan_speed)
-                    if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-                        self.camera_y = min(max_cam, self.camera_y + pan_speed)
-                    if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                        self.camera_x = max(0.0, self.camera_x - pan_speed)
-                    if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                        self.camera_x = min(max_cam, self.camera_x + pan_speed)
+                # Camera operations are inherently bound to the rotated spatial perspective of the active player
+                if keys[pygame.K_w] or keys[pygame.K_UP]:
+                    self.camera_y = max(0.0, self.camera_y - pan_speed)
+                if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                    self.camera_y = min(max_cam, self.camera_y + pan_speed)
+                if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                    self.camera_x = max(0.0, self.camera_x - pan_speed)
+                if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                    self.camera_x = min(max_cam, self.camera_x + pan_speed)
 
             events = pygame.event.get()
             for event in events:
@@ -220,6 +204,7 @@ class ClientApp:
             self.send({"type": "SET_NAME", "username": self.username})
         except Exception as e:
             self.chat_messages.append(f"Connection failed: {e}")
+
     def network_thread(self):
         buffer = ""
         while True:
@@ -251,6 +236,7 @@ class ClientApp:
             self.heightmap = msg.get("heightmap", [])
             self.water_level = msg.get("water_level", -0.5)
             self.starting_gold = msg["starting_gold"]
+            self.game_mode = msg.get("game_mode", "FFA")
             self.update_default_zoom()
         elif mtype == "PLAYER_DISCONNECT":
             self.scores = {int(k): v for k, v in msg["scores"].items()}
@@ -270,6 +256,9 @@ class ClientApp:
         elif mtype == "SETTINGS_UPDATE":
             self.fog_enabled = msg.get("fog", self.fog_enabled)
             self.water_enabled = msg.get("water", self.water_enabled)
+            self.game_mode = msg.get("game_mode", self.game_mode)
+            if "water_rising" in msg:
+                self.water_rising = msg["water_rising"]
             if "heightmap" in msg:
                 self.heightmap = msg["heightmap"]
         elif mtype == "SHOP_START":
@@ -285,8 +274,6 @@ class ClientApp:
             g = msg["gold"]
             self.gold = g.get(str(self.player_id), g.get(self.player_id, self.starting_gold))
             self.ready_map = {int(k): v for k, v in msg["ready"].items()}
-
-            # Apply the updated terrain to the client board
             if "heightmap" in msg:
                 self.heightmap = msg["heightmap"]
         elif mtype == "GAME_START":
@@ -330,7 +317,11 @@ class ClientApp:
         elif mtype == "GAME_OVER":
             self.scores = {int(k): v for k, v in msg["scores"].items()}
             self.game_state = "LOBBY"
-            self.chat_messages.append(f"System: Player {msg['winner']+1} won the round!")
+            winner = msg['winner']
+            if self.game_mode == "2v2":
+                self.chat_messages.append(f"System: Team {winner + 1} won the round!")
+            else:
+                self.chat_messages.append(f"System: Player {winner + 1} won the round!")
 
     def send(self, data):
         if self.sock:
@@ -352,7 +343,6 @@ class ClientApp:
                 self.active_field = "ip"
             elif pygame.Rect(WIDTH // 2 - 100, 355, 200, 40).collidepoint(mx, my):
                 self.connect_to_server(self.ip_input)
-
         elif event.type == pygame.KEYDOWN:
             target_str = self.username if self.active_field == "username" else self.ip_input
             if event.key == pygame.K_BACKSPACE:
@@ -361,7 +351,6 @@ class ClientApp:
                 self.active_field = "ip" if self.active_field == "username" else "username"
             elif event.unicode.isprintable() and len(target_str) < 20:
                 target_str += event.unicode
-
             if self.active_field == "username":
                 self.username = target_str
             else:
@@ -370,18 +359,15 @@ class ClientApp:
     def draw_menu(self):
         SCREEN.fill((25, 25, 30))
         mx, my = pygame.mouse.get_pos()
-
         t = BIG_FONT.render("Realtime Chess - Main Menu", True, (255, 255, 255))
         SCREEN.blit(t, (WIDTH // 2 - t.get_width() // 2, 140))
 
-        # Host Game Server Button (with hover highlight)
         host_rect = pygame.Rect(WIDTH // 2 - 100, 210, 200, 40)
         host_col = (70, 180, 70) if host_rect.collidepoint(mx, my) else (50, 150, 50)
         pygame.draw.rect(SCREEN, host_col, host_rect, border_radius=6)
         ht = FONT.render("Host Game Server", True, (255, 255, 255))
         SCREEN.blit(ht, (WIDTH // 2 - ht.get_width() // 2, 222))
 
-        # Username Field (with active border highlight)
         is_user_active = (self.active_field == "username")
         u_rect = pygame.Rect(WIDTH // 2 - 100, 265, 200, 35)
         u_col = (80, 120, 220) if is_user_active else (50, 50, 70)
@@ -391,7 +377,6 @@ class ClientApp:
         ut = FONT.render(f"Name: {self.username}", True, (255, 255, 255))
         SCREEN.blit(ut, (WIDTH // 2 - 90, 274))
 
-        # IP Field (with active border highlight)
         is_ip_active = (self.active_field == "ip")
         ip_rect = pygame.Rect(WIDTH // 2 - 100, 310, 200, 35)
         ip_col = (80, 120, 220) if is_ip_active else (50, 50, 70)
@@ -401,7 +386,6 @@ class ClientApp:
         jt = FONT.render(f"IP: {self.ip_input}", True, (255, 255, 255))
         SCREEN.blit(jt, (WIDTH // 2 - 90, 319))
 
-        # Join Server Button (with hover highlight)
         join_rect = pygame.Rect(WIDTH // 2 - 100, 355, 200, 40)
         join_col = (70, 110, 210) if join_rect.collidepoint(mx, my) else (50, 90, 180)
         pygame.draw.rect(SCREEN, join_col, join_rect, border_radius=6)
@@ -416,19 +400,17 @@ class ClientApp:
             elif event.key == pygame.K_BACKSPACE:
                 self.chat_input = self.chat_input[:-1]
             elif event.key == pygame.K_UP and self.player_id == 0:
-                # Max board size updated to 128
                 self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
             elif event.key == pygame.K_DOWN and self.player_id == 0:
                 self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
             elif event.key == pygame.K_RIGHT and self.player_id == 0:
-                self.starting_gold = max(100, self.starting_gold + 100)
-                self.send({"type": "SET_STARTING_GOLD", "starting_gold": self.starting_gold})
+                self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(5000, self.starting_gold + 100)})
             elif event.key == pygame.K_LEFT and self.player_id == 0:
-                self.starting_gold = max(100, self.starting_gold - 100)
-                self.send({"type": "SET_STARTING_GOLD", "starting_gold": self.starting_gold})
+                self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
             elif event.key == pygame.K_w and self.player_id == 0:
-                self.water_rising = not self.water_rising
-                self.send({"type": "SET_WATER_RISING", "rising": self.water_rising})
+                self.send({"type": "SET_WATER_RISING", "rising": not self.water_rising})
+            elif event.key == pygame.K_m and self.player_id == 0:
+                self.send({"type": "TOGGLE_MODE"})
             elif event.key == pygame.K_SPACE and self.player_id == 0:
                 self.send({"type": "START_GAME"})
             elif event.unicode.isprintable() and len(self.chat_input) < 40:
@@ -497,94 +479,97 @@ class ClientApp:
             elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
                 self.zoom_at(pygame.mouse.get_pos(), min(4.0, self.zoom * 1.25))
             elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                min_zoom = 1.0
-                self.zoom_at(pygame.mouse.get_pos(), max(min_zoom, self.zoom / 1.25))
+                self.zoom_at(pygame.mouse.get_pos(), max(1.0, self.zoom / 1.25))
         elif event.type == pygame.MOUSEWHEEL:
-            min_zoom = 1.0
-            target_zoom = self.zoom * 1.15 if event.y > 0 else self.zoom / 1.15
-            target_zoom = max(min_zoom, min(4.0, target_zoom))
+            target_zoom = max(1.0, min(4.0, self.zoom * 1.15 if event.y > 0 else self.zoom / 1.15))
             self.zoom_at(pygame.mouse.get_pos(), target_zoom)
 
     def zoom_at(self, mouse_pos, new_zoom):
         wx_before, wy_before = self.to_world_coords(mouse_pos[0], mouse_pos[1])
         self.zoom = new_zoom
-
         board_render_size = 500.0
+        scale = self.zoom * (board_render_size / WORLD_SIZE)
+
+        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+        if self.player_id == 0:   rwx, rwy = cx - (wx_before - cx), cy - (wy_before - cy)
+        elif self.player_id == 2: rwx, rwy = cx + (wy_before - cy), cy - (wx_before - cx)
+        elif self.player_id == 3: rwx, rwy = cx - (wy_before - cy), cy + (wx_before - cx)
+        else:                     rwx, rwy = wx_before, wy_before
+
         local_sx = mouse_pos[0] - 150
         local_sy = mouse_pos[1] - 40
-        if self.player_id == 0:
-            local_sx = board_render_size - local_sx
-            local_sy = board_render_size - local_sy
+        self.camera_x = rwx - (local_sx / scale)
+        self.camera_y = rwy - (local_sy / scale)
 
-        self.camera_x = wx_before - (local_sx / (board_render_size / WORLD_SIZE)) / self.zoom
-        self.camera_y = wy_before - (local_sy / (board_render_size / WORLD_SIZE)) / self.zoom
-
-        max_view_span = WORLD_SIZE / self.zoom
-        max_cam = max(0.0, WORLD_SIZE - max_view_span)
+        max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
         self.camera_x = max(0.0, min(max_cam, self.camera_x))
         self.camera_y = max(0.0, min(max_cam, self.camera_y))
 
-    def to_screen_coords(self, x, y):
+    def to_screen_coords(self, wx, wy):
+        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+        if self.player_id == 0:   rwx, rwy = cx - (wx - cx), cy - (wy - cy)
+        elif self.player_id == 2: rwx, rwy = cx + (wy - cy), cy - (wx - cx)
+        elif self.player_id == 3: rwx, rwy = cx - (wy - cy), cy + (wx - cx)
+        else:                     rwx, rwy = wx, wy
+
         board_render_size = 500.0
-        local_x = (x - self.camera_x) * self.zoom * (board_render_size / WORLD_SIZE)
-        local_y = (y - self.camera_y) * self.zoom * (board_render_size / WORLD_SIZE)
+        scale = self.zoom * (board_render_size / WORLD_SIZE)
+        local_x = (rwx - self.camera_x) * scale
+        local_y = (rwy - self.camera_y) * scale
 
-        offset_x = 150
-        offset_y = 40
-
-        if self.player_id == 0:
-            cx = offset_x + board_render_size - local_x
-            cy = offset_y + board_render_size - local_y
-            return cx, cy
-        return offset_x + local_x, offset_y + local_y
+        return 150 + local_x, 40 + local_y
 
     def to_world_coords(self, sx, sy):
-        offset_x = 150
-        offset_y = 40
         board_render_size = 500.0
+        scale = self.zoom * (board_render_size / WORLD_SIZE)
+        rwx = ((sx - 150) / scale) + self.camera_x
+        rwy = ((sy - 40) / scale) + self.camera_y
 
-        local_sx = sx - offset_x
-        local_sy = sy - offset_y
-
-        if self.player_id == 0:
-            local_sx = board_render_size - local_sx
-            local_sy = board_render_size - local_sy
-
-        wx = self.camera_x + (local_sx / (board_render_size / WORLD_SIZE)) / self.zoom
-        wy = self.camera_y + (local_sy / (board_render_size / WORLD_SIZE)) / self.zoom
+        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+        if self.player_id == 0:   wx, wy = cx - (rwx - cx), cy - (rwy - cy)
+        elif self.player_id == 2: wx, wy = cx - (rwy - cy), cy + (rwx - cx)
+        elif self.player_id == 3: wx, wy = cx + (rwy - cy), cy - (rwx - cx)
+        else:                     wx, wy = rwx, rwy
         return wx, wy
 
     def to_screen_angle(self, angle):
-        return angle + math.pi if self.player_id == 0 else angle
+        if self.player_id == 0:   rot = math.pi
+        elif self.player_id == 2: rot = -math.pi / 2
+        elif self.player_id == 3: rot = math.pi / 2
+        else:                     rot = 0.0
+        return angle + rot
 
     def draw_board(self):
         board_rect = pygame.Rect(150, 40, 500, 500)
         SCREEN.set_clip(board_rect)
 
-        tile_size_world = WORLD_SIZE / float(self.board_size)
+        ts_world = WORLD_SIZE / float(self.board_size)
+        ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
+        rect_size = math.ceil(ts_screen) + 1
+
         for r in range(self.board_size):
             for c in range(self.board_size):
-                map_r = self.board_size - 1 - r if self.player_id == 0 else r
-                map_c = self.board_size - 1 - c if self.player_id == 0 else c
-
-                base_color = (105, 185, 85)
-                color = base_color
-                # Updated color logic: Crisp green land and blue water
-                if self.heightmap and map_r < len(self.heightmap) and map_c < len(self.heightmap[map_r]):
-                    h = self.heightmap[map_r][map_c]
+                if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
+                    h = self.heightmap[r][c]
                     if h <= self.water_level:
-                        color = (40, 120, 220)  # Blue water
+                        color = (40, 120, 220)
                     else:
-                        # Subtle shade variation that stays pure green (no red/yellow added)
                         green_val = max(120, min(220, int(160 + h * 30)))
-                        color = (40, green_val, 50)  # Green land
+                        color = (40, green_val, 50)
+                else:
+                    color = (105, 185, 85)
 
-                wx = c * tile_size_world
-                wy = r * tile_size_world
+                wx = c * ts_world + ts_world/2.0
+                wy = r * ts_world + ts_world/2.0
                 sx, sy = self.to_screen_coords(wx, wy)
 
-                ts_screen = tile_size_world * self.zoom * (500.0 / WORLD_SIZE)
-                pygame.draw.rect(SCREEN, color, (math.floor(sx), math.floor(sy), math.ceil(ts_screen), math.ceil(ts_screen)))
+                margin = rect_size
+                if sx < 150 - margin or sx > 650 + margin or sy < 40 - margin or sy > 540 + margin:
+                    continue
+
+                rect = pygame.Rect(0, 0, rect_size, rect_size)
+                rect.center = (int(sx), int(sy))
+                pygame.draw.rect(SCREEN, color, rect)
 
         SCREEN.set_clip(None)
 
@@ -594,14 +579,15 @@ class ClientApp:
 
         for p in self.projectiles:
             sx, sy = self.to_screen_coords(p["x"], p["y"])
-            end_x = sx + int(10 * self.zoom * math.cos(self.to_screen_angle(p["angle"])))
-            end_y = sy + int(10 * self.zoom * math.sin(self.to_screen_angle(p["angle"])))
+            s_angle = self.to_screen_angle(p["angle"])
+            end_x = sx + int(10 * self.zoom * math.cos(s_angle))
+            end_y = sy + int(10 * self.zoom * math.sin(s_angle))
             pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
 
         for u in self.units:
             sx, sy = self.to_screen_coords(u["x"], u["y"])
             s_angle = self.to_screen_angle(u["angle"])
-            color = PLAYER_COLORS[u["owner"]]
+            color = PLAYER_COLORS.get(u["owner"], (255, 255, 255))
 
             block_width = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
@@ -650,51 +636,40 @@ class ClientApp:
         SCREEN.set_clip(None)
 
     def draw_minimap(self):
-        if not self.show_minimap:
-            return
+        if not self.show_minimap: return
         mm_size = 100
         mm_x = WIDTH - mm_size - 15
         mm_y = 50
 
-        # Background box
         pygame.draw.rect(SCREEN, (20, 20, 25), (mm_x, mm_y, mm_size, mm_size))
         pygame.draw.rect(SCREEN, (100, 100, 100), (mm_x, mm_y, mm_size, mm_size), 1)
 
-        view_w = (WORLD_SIZE / self.zoom) / (WORLD_SIZE / mm_size)
-        view_h = (WORLD_SIZE / self.zoom) / (WORLD_SIZE / mm_size)
+        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+        for u in self.units:
+            if self.player_id == 0:   rwx, rwy = cx - (u["x"] - cx), cy - (u["y"] - cy)
+            elif self.player_id == 2: rwx, rwy = cx + (u["y"] - cy), cy - (u["x"] - cx)
+            elif self.player_id == 3: rwx, rwy = cx - (u["y"] - cy), cy + (u["x"] - cx)
+            else:                     rwx, rwy = u["x"], u["y"]
 
-        if self.player_id == 0:
-            # Flipped orientation matching Player 1 screen perspective
-            for u in self.units:
-                ux = mm_x + mm_size - int((u["x"] / WORLD_SIZE) * mm_size)
-                uy = mm_y + mm_size - int((u["y"] / WORLD_SIZE) * mm_size)
-                col = PLAYER_COLORS[u["owner"]]
-                pygame.draw.circle(SCREEN, col, (ux, uy), 2)
+            ux = mm_x + int((rwx / WORLD_SIZE) * mm_size)
+            uy = mm_y + int((rwy / WORLD_SIZE) * mm_size)
+            col = PLAYER_COLORS.get(u["owner"], (255, 255, 255))
+            pygame.draw.circle(SCREEN, col, (ux, uy), 2)
 
-            view_span = WORLD_SIZE / self.zoom
-            view_x = mm_x + int(((WORLD_SIZE - self.camera_x - view_span) / WORLD_SIZE) * mm_size)
-            view_y = mm_y + int(((WORLD_SIZE - self.camera_y - view_span) / WORLD_SIZE) * mm_size)
-        else:
-            # Standard orientation for Player 2
-            for u in self.units:
-                ux = mm_x + int((u["x"] / WORLD_SIZE) * mm_size)
-                uy = mm_y + int((u["y"] / WORLD_SIZE) * mm_size)
-                col = PLAYER_COLORS[u["owner"]]
-                pygame.draw.circle(SCREEN, col, (ux, uy), 2)
-
-            view_x = mm_x + int((self.camera_x / WORLD_SIZE) * mm_size)
-            view_y = mm_y + int((self.camera_y / WORLD_SIZE) * mm_size)
-
-        # Draw viewport boundary box
-        pygame.draw.rect(SCREEN, (255, 255, 255), (view_x, view_y, view_w, view_h), 1)
+        vw = int(((WORLD_SIZE / self.zoom) / WORLD_SIZE) * mm_size)
+        vh = int(((WORLD_SIZE / self.zoom) / WORLD_SIZE) * mm_size)
+        vx = mm_x + int((self.camera_x / WORLD_SIZE) * mm_size)
+        vy = mm_y + int((self.camera_y / WORLD_SIZE) * mm_size)
+        pygame.draw.rect(SCREEN, (255, 255, 255), (vx, vy, vw, vh), 1)
 
     def draw_lobby(self):
         title = BIG_FONT.render("Realtime-Chess Waiting Room", True, (255, 255, 255))
         SCREEN.blit(title, (40, 15))
-        score_txt = FONT.render(f"Score - P1: {self.scores.get(0, 0)} | P2: {self.scores.get(1, 0)}", True, (200, 200, 200))
+        score_str = " | ".join([f"P{k+1}: {v}" for k, v in sorted(self.scores.items())])
+        score_txt = FONT.render(f"Scores - {score_str}", True, (200, 200, 200))
         SCREEN.blit(score_txt, (40, 40))
 
-        settings_txt = FONT.render(f"Board Size: {self.board_size} (UP/DOWN) | Gold: ${self.starting_gold} (G) | Water Rising: {self.water_rising} (W)", True, (200, 220, 100))
+        settings_txt = FONT.render(f"Mode: {self.game_mode} (M) | Size: {self.board_size} (UP/DN) | Gold: ${self.starting_gold} (L/R) | Water: {self.water_rising} (W)", True, (200, 220, 100))
         SCREEN.blit(settings_txt, (40, 65))
 
         start_txt = FONT.render("Press SPACE to Start (Host Only)", True, (100, 255, 100))
@@ -725,7 +700,8 @@ class ClientApp:
         header = pygame.Surface((WIDTH, 40))
         header.fill((15, 15, 20))
         SCREEN.blit(header, (0, 0))
-        SCREEN.blit(FONT.render(f"Score - P1: {self.scores.get(0,0)}  vs  P2: {self.scores.get(1,0)} | Playing as Player {self.player_id + 1} | Zoom: {self.zoom:.2f}x (Scroll/+/-)", True, (255, 255, 255)), (15, 12))
+        score_str = " | ".join([f"P{k+1}: {v}" for k, v in sorted(self.scores.items())])
+        SCREEN.blit(FONT.render(f"[{self.game_mode}] {score_str} | Playing as Player {self.player_id + 1} | Zoom: {self.zoom:.2f}x (Scroll/+/-)", True, (255, 255, 255)), (15, 12))
 
         self.draw_board()
         self.draw_units_and_projectiles()
@@ -735,10 +711,8 @@ class ClientApp:
             mx, my = pygame.mouse.get_pos()
             start_x, start_y = self.drag_start
             if start_y > 40 and my > 40:
-                rect_x = min(start_x, mx)
-                rect_y = min(start_y, my)
-                rect_w = abs(mx - start_x)
-                rect_h = abs(my - start_y)
+                rect_x, rect_y = min(start_x, mx), min(start_y, my)
+                rect_w, rect_h = abs(mx - start_x), abs(my - start_y)
                 pygame.draw.rect(SCREEN, (0, 255, 0), (rect_x, rect_y, rect_w, rect_h), 1)
 
 if __name__ == "__main__":
