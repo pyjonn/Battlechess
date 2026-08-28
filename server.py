@@ -343,46 +343,52 @@ class Server:
                 self.gold[pid] -= cost
                 logging.info(f"Player {pid} bought {utype} for ${cost}. Remaining gold: ${self.gold[pid]}")
 
-                player_units = [u for u in self.units if u["owner"] == pid]
-                row_idx = len(player_units) // 6
-                col_idx = len(player_units) % 6
+                # Locate the player's King
+                king = next((u for u in self.units if u["owner"] == pid and u["type"] == "King"), None)
+                center_x = king["x"] if king else 400
+                center_y = king["y"] if king else (120 if pid == 0 else 680)
 
-                # Calculate the ideal grid position
-                base_y = 160 if pid == 0 else 640
-                intended_x = 200 + (col_idx * 45)
-                intended_y = base_y + (row_idx * 25 * (1 if pid == 0 else -1))
+                tile_pixel_size = 800.0 / self.board_size
+                four_block_radius = int(2.0 * tile_pixel_size) / 2
 
-                # Search outward in a circle to find the nearest valid land
-                spawn_x, spawn_y = intended_x, intended_y
-                search_radius = 0
+                # Minimum spacing required between this new unit and existing units
+                min_spacing = tile_pixel_size * 2.5
 
-                while search_radius < 400:
-                    # Increase the number of check points as the circle gets larger
-                    steps = max(1, int(search_radius / 8))
-                    found_land = False
+                spawn_x, spawn_y = center_x, center_y
+                search_radius = 25.0
+                found_spot = False
+
+                # Search outward in expanding rings
+                while search_radius < 400 and not found_spot:
+                    steps = max(8, int(search_radius / 5))
 
                     for i in range(steps):
                         angle = (i / steps) * math.pi * 2
-                        # Clamp coordinates to keep units on the board
-                        cx = max(10, min(790, intended_x + math.cos(angle) * search_radius))
-                        cy = max(10, min(790, intended_y + math.sin(angle) * search_radius))
+                        cx = max(10, min(790, center_x + math.cos(angle) * search_radius))
+                        cy = max(10, min(790, center_y + math.sin(angle) * search_radius))
 
-                        # Verify the elevation is above the water level
+                        # 1. Verify the spot is on dry land
                         if get_height_at_pos(cx, cy, self.heightmap, self.board_size) > self.water_level:
-                            spawn_x, spawn_y = cx, cy
-                            found_land = True
-                            break
 
-                    if found_land:
-                        break
-                    search_radius += 15
-                tile_pixel_size = 800.0 / self.board_size
-                four_block_radius = int(2.0 * tile_pixel_size) / 2
+                            # 2. Verify the spot is not too close to any other unit
+                            too_close = False
+                            for u in self.units:
+                                if math.hypot(u["x"] - cx, u["y"] - cy) < min_spacing:
+                                    too_close = True
+                                    break
+
+                            if not too_close:
+                                spawn_x, spawn_y = cx, cy
+                                found_spot = True
+                                break
+
+                    search_radius += 15.0
 
                 shapes = {
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
                     "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
                 }
+                # ... [Keep the rest of the unit dictionary generation identical] ...
                 max_hps = {"Pawn": 100, "Knight": 80, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
