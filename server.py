@@ -565,7 +565,7 @@ class Server:
 
                     if u["type"] == "Knight":
                         # Archers only fire when standing still and range scales with unit radius
-                        archer_range = u["radius"] * 10.0
+                        archer_range = u["radius"] * 20.0
                         projectile_life = max(1, int(archer_range / 11.0))
 
                         if not u["is_moving"] and e_dist < archer_range and can_see and now - u["last_attack"] > 2.0:
