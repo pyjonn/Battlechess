@@ -516,7 +516,12 @@ class Server:
                 if dist > 3:
                     u["is_moving"] = True
                     tile_pixel_size = 800.0 / self.board_size
-                    base_blocks_per_second = (3.2 if u["type"] == "Bishop" else (1.4 if u["type"] == "King" else 2.2))
+                    # Slowed Rook speed to 1.2 blocks per second
+                    base_blocks_per_second = (
+                        3.2 if u["type"] == "Bishop" else
+                        (1.4 if u["type"] == "King" else
+                        (1.2 if u["type"] == "Rook" else 2.2))
+                    )
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
                     current_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
@@ -559,15 +564,19 @@ class Server:
                     bonus_dmg = int(max(0, attacker_h - target_h) * 15)
 
                     if u["type"] == "Knight":
-                         if e_dist < 220 and can_see and now - u["last_attack"] > 2.0:
-                             u["last_attack"] = now
-                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                             u["angle"] = base_ang
-                             self.projectiles.append({
-                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.25, 0.25),
-                                 "owner": u["owner"], "damage": 25 + bonus_dmg, "life": 40
-                             })
-                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
+                        # Archers only fire when standing still and range scales with unit radius
+                        archer_range = u["radius"] * 10.0
+                        projectile_life = max(1, int(archer_range / 11.0))
+
+                        if not u["is_moving"] and e_dist < archer_range and can_see and now - u["last_attack"] > 2.0:
+                            u["last_attack"] = now
+                            base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
+                            u["angle"] = base_ang
+                            self.projectiles.append({
+                                "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.25, 0.25),
+                                "owner": u["owner"], "damage": 25 + bonus_dmg, "life": projectile_life
+                            })
+                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
                     elif u["type"] == "Healer":
                         heal_range = (u["radius"] + target["radius"] + 10)
                         if e_dist < heal_range and now - u["last_attack"] > 0.8:
