@@ -719,16 +719,14 @@ class Server:
                         u["target_x"], u["target_y"] = wp_x, wp_y
 
                 # Auto-acquire targets for idle or moving units
+                # Auto-acquire targets for idle or moving units
+                # --- HEALER TARGETING ---
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
                         if target and target["hp"] >= target["max_hp"]:
                             u["target_unit"] = None
                             target = None
-                        elif not target:
-                            u["target_unit"] = None
-                            u["target_x"] = u.get("guard_x", u["x"])
-                            u["target_y"] = u.get("guard_y", u["y"])
 
                     if not target and not u.get("target_unit"):
                         friendlies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"]) and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
@@ -736,10 +734,14 @@ class Server:
                         if target:
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            # Return to guard anchor if no hurt allies around
-                            u["target_x"] = u.get("guard_x", u["x"])
-                            u["target_y"] = u.get("guard_y", u["y"])
+                            # Only return to guard position if NO enemies are nearby
+                            enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
+                            nearby_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=500.0, max_leash=9999.0)
+                            if not nearby_enemy:
+                                u["target_x"] = u.get("guard_x", u["x"])
+                                u["target_y"] = u.get("guard_y", u["y"])
 
+                # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
@@ -747,40 +749,51 @@ class Server:
                         # Disengage target if it walked beyond max leash distance from guard anchor
                         if target:
                             guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            if guard_dist > 180.0:
+                            max_leash = 350.0 if u["type"] == "Knight" else 180.0
+                            if guard_dist > max_leash:
                                 target = None
                                 u["target_unit"] = None
-
-                        if not target:
-                            u["target_unit"] = None
-                            u["target_x"] = u.get("guard_x", u["x"])
-                            u["target_y"] = u.get("guard_y", u["y"])
 
                     # Automatically acquire nearest enemy in path/range if no current explicit target
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = u["radius"] * 20.0 if u["type"] == "Knight" else 150.0
-                        closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=180.0)
+                        scan_range = 350.0 if u["type"] == "Knight" else 180.0
+                        leash_range = 400.0 if u["type"] == "Knight" else 180.0
+
+                        closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
                             target = closest_enemy
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            # Return to guard post when idle and no enemies near
-                            u["target_x"] = u.get("guard_x", u["x"])
-                            u["target_y"] = u.get("guard_y", u["y"])
+                            # Check if ANY enemy exists within detection range before returning to guard post
+                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=9999.0)
+                            if not any_enemy_near:
+                                u["target_x"] = u.get("guard_x", u["x"])
+                                u["target_y"] = u.get("guard_y", u["y"])
 
-                if u["type"] == "Knight" and target:
-                    archer_range = u["radius"] * 20.0
-                    e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
-                    if e_dist <= archer_range:
-                        u["waypoints"] = []
-                        u["target_x"] = u["x"]
-                        u["target_y"] = u["y"]
+                # --- ARCHER (KNIGHT) RANGE & AUTO-STOP BEHAVIOR ---
+                # --- ARCHER (KNIGHT) RANGE & AUTO-STOP BEHAVIOR ---
+                    if u["type"] == "Knight" and target:
+                        archer_range = 350.0  # Consistent range check
+                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
 
-                if target and u.get("target_unit"):
-                    u["target_x"] = target["x"]
-                    u["target_y"] = target["y"]
+                        # Pivot face towards target immediately even if standing still
+                        desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
+                        u["angle"] = lerp_angle(u["angle"], desired_angle, 0.25)
 
+                        # If target is within range, stop moving and hold guard position
+                        if e_dist <= archer_range:
+                            u["waypoints"] = []
+                            u["target_x"] = u["x"]
+                            u["target_y"] = u["y"]
+                            u["is_moving"] = False
+
+                    if target and u.get("target_unit"):
+                        archer_range = 350.0 if u["type"] == "Knight" else 0.0
+                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
+                        if u["type"] != "Knight" or e_dist > archer_range:
+                            u["target_x"] = target["x"]
+                            u["target_y"] = target["y"]
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
@@ -843,15 +856,15 @@ class Server:
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Knight":
-                        archer_range = u["radius"] * 20.0
+                        archer_range = 350.0
                         projectile_life = max(1, int(archer_range / 11.0))
 
-                        if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 2.0:
+                        if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
                             u["last_attack"] = now
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                             u["angle"] = base_ang
                             self.projectiles.append({
-                                "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.25, 0.25),
+                                "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
                                 "owner": u["owner"], "damage": 25 + bonus_dmg, "life": projectile_life
                             })
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
