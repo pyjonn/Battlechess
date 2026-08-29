@@ -98,6 +98,7 @@ class ClientApp:
         self.active_field = "username"
         self.ip_input = "127.0.0.1"
         self.player_id = None
+        self.chat_active = False
         self.scores = {}
         self.kills = {}
         self.usernames = {}
@@ -415,28 +416,37 @@ class ClientApp:
         SCREEN.blit(jbt, (WIDTH // 2 - jbt.get_width() // 2, 366))
 
     def handle_lobby_events(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # Check if the click is inside the new chat bar area
+            if pygame.Rect(40, 540, 870, 35).collidepoint(event.pos):
+                self.chat_active = True
+            else:
+                self.chat_active = False
+
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RETURN and self.chat_input.strip():
-                self.send({"type": "CHAT", "text": self.chat_input})
-                self.chat_input = ""
-            elif event.key == pygame.K_BACKSPACE:
-                self.chat_input = self.chat_input[:-1]
-            elif event.key == pygame.K_UP and self.player_id == 0:
-                self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
-            elif event.key == pygame.K_DOWN and self.player_id == 0:
-                self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
-            elif event.key == pygame.K_RIGHT and self.player_id == 0:
-                self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(10000, self.starting_gold + 100)})
-            elif event.key == pygame.K_LEFT and self.player_id == 0:
-                self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
-            elif event.key == pygame.K_w and self.player_id == 0:
-                self.send({"type": "SET_WATER_RISING", "rising": not self.water_rising})
-            elif event.key == pygame.K_m and self.player_id == 0:
-                self.send({"type": "TOGGLE_MODE"})
-            elif event.key == pygame.K_SPACE and self.player_id == 0:
-                self.send({"type": "START_GAME"})
-            elif event.unicode.isprintable() and len(self.chat_input) < 40:
-                self.chat_input += event.unicode
+            if self.chat_active:
+                if event.key == pygame.K_RETURN and self.chat_input.strip():
+                    self.send({"type": "CHAT", "text": self.chat_input})
+                    self.chat_input = ""
+                elif event.key == pygame.K_BACKSPACE:
+                    self.chat_input = self.chat_input[:-1]
+                elif event.unicode.isprintable() and len(self.chat_input) < 40:
+                    self.chat_input += event.unicode
+            else:
+                if event.key == pygame.K_UP and self.player_id == 0:
+                    self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
+                elif event.key == pygame.K_DOWN and self.player_id == 0:
+                    self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
+                elif event.key == pygame.K_RIGHT and self.player_id == 0:
+                    self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(10000, self.starting_gold + 100)})
+                elif event.key == pygame.K_LEFT and self.player_id == 0:
+                    self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
+                elif event.key == pygame.K_w and self.player_id == 0:
+                    self.send({"type": "SET_WATER_RISING", "rising": not self.water_rising})
+                elif event.key == pygame.K_m and self.player_id == 0:
+                    self.send({"type": "TOGGLE_MODE"})
+                elif event.key == pygame.K_SPACE and self.player_id == 0:
+                    self.send({"type": "START_GAME"})
 
     def handle_shop_events(self, event):
         self.handle_common_board_events(event)
@@ -766,9 +776,22 @@ class ClientApp:
         start_txt = FONT.render("Press SPACE to Start (Host Only)", True, (100, 255, 100))
         SCREEN.blit(start_txt, (40, 95))
 
-        pygame.draw.rect(SCREEN, (20, 20, 25), (40, 130, 870, 440))
+        # Shortened message log from 440 to 400 to fit chat bar
+        pygame.draw.rect(SCREEN, (20, 20, 25), (40, 130, 870, 400))
         for i, msg in enumerate(self.chat_messages[-16:]):
             SCREEN.blit(FONT.render(msg, True, (220, 220, 220)), (50, 140 + i * 22))
+
+        # Draw interactive chat bar
+        chat_rect = pygame.Rect(40, 540, 870, 35)
+        chat_col = (80, 120, 220) if self.chat_active else (50, 50, 70)
+        pygame.draw.rect(SCREEN, chat_col, chat_rect, border_radius=6)
+
+        if self.chat_active:
+            pygame.draw.rect(SCREEN, (255, 255, 255), chat_rect, width=2, border_radius=6)
+
+        prompt = "Chat: " if self.chat_active else "Click here to chat..."
+        text_surf = FONT.render(prompt + self.chat_input, True, (255, 255, 255))
+        SCREEN.blit(text_surf, (50, 548))
 
     def draw_shop(self):
         self.draw_sidebar()
