@@ -147,6 +147,15 @@ def lerp_angle(current, target, max_delta):
         return current - max_delta
     return target
 
+def get_unit_base_speed(unit_type):
+    if unit_type == "Bishop":
+        return 3.2
+    elif unit_type == "King":
+        return 1.4
+    elif unit_type == "Rook":
+        return 1.2
+    return 2.2
+
 class Server:
     def __init__(self):
         logging.info("Initializing Game Server...")
@@ -395,7 +404,8 @@ class Server:
                     "draw_radius": int(tile_pixel_size * 1.5),
                     "radius": four_block_radius,
                     "vx": 0.0,
-                    "vy": 0.0
+                    "vy": 0.0,
+                    "group_speed": None
                 })
                 self.next_unit_id += 1
 
@@ -488,7 +498,8 @@ class Server:
                     "draw_radius": draw_radii[utype],
                     "radius": four_block_radius,
                     "vx": 0.0,
-                    "vy": 0.0
+                    "vy": 0.0,
+                    "group_speed": None
                 })
                 self.next_unit_id += 1
 
@@ -525,13 +536,23 @@ class Server:
                 center_x = sum(u["x"] for u in selected_group) / len(selected_group)
                 center_y = sum(u["y"] for u in selected_group) / len(selected_group)
 
+                # Determine minimum base speed among units to preserve formation
+                group_min_speed = min(get_unit_base_speed(u["type"]) for u in selected_group) if len(selected_group) > 1 else None
+
                 for u in selected_group:
                     offset_x = u["x"] - center_x
                     offset_y = u["y"] - center_y
-                    wp = (tx + offset_x, ty + offset_y, t_unit)
+
+                    # Clamp offset destination to keep target within world boundaries
+                    bounded_tx = max(u["radius"], min(800.0 - u["radius"], tx + offset_x))
+                    bounded_ty = max(u["radius"], min(800.0 - u["radius"], ty + offset_y))
+
+                    wp = (bounded_tx, bounded_ty, t_unit)
 
                     if "waypoints" not in u:
                         u["waypoints"] = []
+
+                    u["group_speed"] = group_min_speed if len(selected_group) > 1 else None
 
                     if not append_path:
                         u["waypoints"] = [wp]
@@ -652,11 +673,7 @@ class Server:
                 if dist > 3:
                     u["is_moving"] = True
                     tile_pixel_size = 800.0 / self.board_size
-                    base_blocks_per_second = (
-                        3.2 if u["type"] == "Bishop" else
-                        (1.4 if u["type"] == "King" else
-                        (1.2 if u["type"] == "Rook" else 2.2))
-                    )
+                    base_blocks_per_second = u.get("group_speed") if u.get("group_speed") is not None else get_unit_base_speed(u["type"])
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
                     ahead_x = u["x"] + (dx / dist) * 10.0
@@ -702,6 +719,8 @@ class Server:
                                 next_wp = u["waypoints"][0]
                                 u["target_x"], u["target_y"] = next_wp[0], next_wp[1]
                                 u["target_unit"] = next_wp[2] if len(next_wp) > 2 else None
+                            else:
+                                u["group_speed"] = None
 
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
