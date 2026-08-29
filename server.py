@@ -528,21 +528,20 @@ class Server:
                 for u in selected_group:
                     offset_x = u["x"] - center_x
                     offset_y = u["y"] - center_y
-                    wp = (tx + offset_x, ty + offset_y)
+                    wp = (tx + offset_x, ty + offset_y, t_unit)
 
                     if "waypoints" not in u:
                         u["waypoints"] = []
 
                     if not append_path:
-                        # Clear existing waypoints and override current destination
                         u["waypoints"] = [wp]
                         u["target_unit"] = t_unit
-                        u["target_x"], u["target_y"] = wp
+                        u["target_x"], u["target_y"] = wp[0], wp[1]
                     else:
-                        # Append new point to the path queue
                         u["waypoints"].append(wp)
                         if len(u["waypoints"]) == 1:
-                            u["target_x"], u["target_y"] = wp
+                            u["target_unit"] = t_unit
+                            u["target_x"], u["target_y"] = wp[0], wp[1]
 
     def is_enemy(self, owner1, owner2):
         if self.game_mode == "2v2":
@@ -597,6 +596,25 @@ class Server:
                     u["hp"] -= water_depth * 0.8
                     u["is_hit"] = True
 
+                # Synchronize waypoint state with unit objective targeting
+                if u.get("waypoints"):
+                    current_wp = u["waypoints"][0]
+                    wp_x, wp_y = current_wp[0], current_wp[1]
+                    wp_target_id = current_wp[2] if len(current_wp) > 2 else None
+
+                    if wp_target_id is not None:
+                        t_exists = any(e["id"] == wp_target_id and e["hp"] > 0 for e in self.units)
+                        if t_exists:
+                            u["target_unit"] = wp_target_id
+                        else:
+                            # Targeted enemy unit slain; convert waypoint objective to point destination
+                            u["target_unit"] = None
+                            u["waypoints"][0] = (wp_x, wp_y, None)
+                            u["target_x"], u["target_y"] = wp_x, wp_y
+                    else:
+                        u["target_unit"] = None
+                        u["target_x"], u["target_y"] = wp_x, wp_y
+
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
@@ -605,7 +623,7 @@ class Server:
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    if not target and not u.get("target_unit"):
+                    if not target and not u.get("target_unit") and not u.get("waypoints"):
                         friendlies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"]) and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
                         if friendlies:
                             friendlies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
@@ -618,7 +636,7 @@ class Server:
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    if not target and not u.get("target_unit"):
+                    if not target and not u.get("target_unit") and not u.get("waypoints"):
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                         if enemies:
                             enemies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
@@ -674,10 +692,16 @@ class Server:
 
                     # Waypoint Queue Processing
                     if u.get("waypoints"):
-                        u["waypoints"].pop(0)  # Reached current waypoint
-                        if u["waypoints"]:
-                            next_wp = u["waypoints"][0]
-                            u["target_x"], u["target_y"] = next_wp
+                        current_wp = u["waypoints"][0]
+                        wp_target_id = current_wp[2] if len(current_wp) > 2 else None
+
+                        # Advance to next waypoint only if target unit is dead/unspecified
+                        if wp_target_id is None:
+                            u["waypoints"].pop(0)
+                            if u["waypoints"]:
+                                next_wp = u["waypoints"][0]
+                                u["target_x"], u["target_y"] = next_wp[0], next_wp[1]
+                                u["target_unit"] = next_wp[2] if len(next_wp) > 2 else None
 
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
