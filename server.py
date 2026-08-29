@@ -25,7 +25,7 @@ UNIT_SCORES = {
 UNIT_WEIGHTS = {
     "Pawn": 1.0,
     "Knight": 0.8,
-    "Bishop": 0.9,  # Increased from 0.25 to prevent extreme displacement
+    "Bishop": 0.9,
     "Healer": 0.8,
     "King": 1.5,
     "Rook": 3,
@@ -67,10 +67,13 @@ def sample_smooth_noise(grid, x, y):
     bottom = v01 + sx * (v11 - v01)
     return top + sy * (bottom - top)
 
-def find_nearest_enemy_in_path(unit, enemies, scan_radius=150.0):
-    """Finds the closest enemy within a scan radius."""
+def find_nearest_enemy_in_path(unit, enemies, scan_radius=150.0, max_leash=180.0):
+    """Finds the closest enemy within scan radius, provided they aren't beyond the leash distance from guard post."""
     closest_enemy = None
     min_dist = scan_radius
+
+    guard_x = unit.get("guard_x", unit["x"])
+    guard_y = unit.get("guard_y", unit["y"])
 
     for enemy in enemies:
         if enemy["hp"] <= 0:
@@ -80,16 +83,22 @@ def find_nearest_enemy_in_path(unit, enemies, scan_radius=150.0):
         dy = enemy["y"] - unit["y"]
         dist = math.hypot(dx, dy)
 
-        if dist < min_dist:
+        # Check distance from the unit's guard position to prevent over-chasing
+        dist_from_guard = math.hypot(enemy["x"] - guard_x, enemy["y"] - guard_y)
+
+        if dist < min_dist and dist_from_guard <= max_leash:
             min_dist = dist
             closest_enemy = enemy
 
     return closest_enemy
 
-def find_nearest_hurt_ally(unit, allies, scan_radius=250.0):
-    """Finds the closest damaged friendly unit within scan radius."""
+def find_nearest_hurt_ally(unit, allies, scan_radius=250.0, max_leash=200.0):
+    """Finds the closest damaged friendly unit within scan radius and leash limit."""
     closest_ally = None
     min_dist = scan_radius
+
+    guard_x = unit.get("guard_x", unit["x"])
+    guard_y = unit.get("guard_y", unit["y"])
 
     for ally in allies:
         if ally["id"] == unit["id"] or ally["hp"] >= ally["max_hp"] or ally["hp"] <= 0:
@@ -99,7 +108,9 @@ def find_nearest_hurt_ally(unit, allies, scan_radius=250.0):
         dy = ally["y"] - unit["y"]
         dist = math.hypot(dx, dy)
 
-        if dist < min_dist:
+        dist_from_guard = math.hypot(ally["x"] - guard_x, ally["y"] - guard_y)
+
+        if dist < min_dist and dist_from_guard <= max_leash:
             min_dist = dist
             closest_ally = ally
 
@@ -443,6 +454,8 @@ class Server:
                     "y": ky,
                     "target_x": kx,
                     "target_y": ky,
+                    "guard_x": kx,
+                    "guard_y": ky,
                     "waypoints": [],
                     "hp": 300,
                     "max_hp": 300,
@@ -546,6 +559,8 @@ class Server:
                     "y": spawn_y,
                     "target_x": spawn_x,
                     "target_y": spawn_y,
+                    "guard_x": spawn_x,
+                    "guard_y": spawn_y,
                     "waypoints": [],
                     "hp": max_hps[utype],
                     "max_hp": max_hps[utype],
@@ -610,6 +625,8 @@ class Server:
                         u["waypoints"] = []
 
                     u["group_speed"] = group_min_speed if len(selected_group) > 1 else None
+                    u["guard_x"] = bounded_tx
+                    u["guard_y"] = bounded_ty
 
                     if not append_path:
                         u["waypoints"] = [wp]
@@ -710,31 +727,47 @@ class Server:
                             target = None
                         elif not target:
                             u["target_unit"] = None
-                            u["target_x"] = u["x"]
-                            u["target_y"] = u["y"]
+                            u["target_x"] = u.get("guard_x", u["x"])
+                            u["target_y"] = u.get("guard_y", u["y"])
 
                     if not target and not u.get("target_unit"):
                         friendlies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"]) and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
                         target = find_nearest_hurt_ally(u, friendlies)
                         if target:
                             u["target_unit"] = target["id"]
+                        elif not u.get("waypoints"):
+                            # Return to guard anchor if no hurt allies around
+                            u["target_x"] = u.get("guard_x", u["x"])
+                            u["target_y"] = u.get("guard_y", u["y"])
 
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
+
+                        # Disengage target if it walked beyond max leash distance from guard anchor
+                        if target:
+                            guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
+                            if guard_dist > 180.0:
+                                target = None
+                                u["target_unit"] = None
+
                         if not target:
                             u["target_unit"] = None
-                            u["target_x"] = u["x"]
-                            u["target_y"] = u["y"]
+                            u["target_x"] = u.get("guard_x", u["x"])
+                            u["target_y"] = u.get("guard_y", u["y"])
 
                     # Automatically acquire nearest enemy in path/range if no current explicit target
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                         scan_range = u["radius"] * 20.0 if u["type"] == "Knight" else 150.0
-                        closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range)
+                        closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=180.0)
                         if closest_enemy:
                             target = closest_enemy
                             u["target_unit"] = target["id"]
+                        elif not u.get("waypoints"):
+                            # Return to guard post when idle and no enemies near
+                            u["target_x"] = u.get("guard_x", u["x"])
+                            u["target_y"] = u.get("guard_y", u["y"])
 
                 if u["type"] == "Knight" and target:
                     archer_range = u["radius"] * 20.0
