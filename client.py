@@ -128,6 +128,7 @@ class ClientApp:
         self.camera_x = 0.0
         self.camera_y = 0.0
         self.show_minimap = True
+        self.selected_shop_item = None  # Tracks the currently active shop unit for placement[cite: 17]
 
     def get_player_color(self, owner):
         if self.game_mode == "2v2":
@@ -476,15 +477,27 @@ class ClientApp:
                     self.send({"type": "START_GAME"})
 
     def handle_shop_events(self, event):
-        self.handle_common_board_events(event)
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            mx, my = event.pos
-            for i, (name, cost) in enumerate(SHOP_ITEMS):
-                if pygame.Rect(260 + i * 105, 550, 100, 38).collidepoint(mx, my):
-                    self.send({"type": "BUY_UNIT", "unit_type": name})
-                    break
-            if pygame.Rect(820, 550, 110, 38).collidepoint(mx, my):
-                self.send({"type": "READY_SHOP"})
+            self.handle_common_board_events(event)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+
+                # 1. Place the selected unit on the board
+                if mx > 250 and my > 40 and self.selected_shop_item:
+                    wmx, wmy = self.to_world_coords(mx, my)
+                    self.send({
+                        "type": "BUY_UNIT",
+                        "unit_type": self.selected_shop_item,
+                        "x": wmx, "y": wmy
+                    })
+
+                # 2. Select unit from the shop[cite: 17]
+                for i, (name, cost) in enumerate(SHOP_ITEMS):
+                    if pygame.Rect(260 + i * 105, 550, 100, 38).collidepoint(mx, my):
+                        self.selected_shop_item = name
+                        break
+
+                if pygame.Rect(820, 550, 110, 38).collidepoint(mx, my):
+                    self.send({"type": "READY_SHOP"})
 
     def handle_game_events(self, event):
         self.handle_common_board_events(event)
@@ -665,9 +678,14 @@ class ClientApp:
             pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
 
         for u in self.units:
+                    # Hide enemy units during the buy phase, EXCEPT for the King
+            if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
+                continue
+
             sx, sy = self.to_screen_coords(u["x"], u["y"])
             s_angle = self.to_screen_angle(u["angle"])
             color = self.get_player_color(u["owner"])
+
 
             block_width = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
@@ -772,6 +790,9 @@ class ClientApp:
 
         cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
         for u in self.units:
+                    # Hide enemy dots on the minimap during the buy phase, EXCEPT for the King
+            if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
+                continue
             if self.player_id == 0:   rwx, rwy = cx - (u["x"] - cx), cy - (u["y"] - cy)
             elif self.player_id == 2: rwx, rwy = cx + (u["y"] - cy), cy - (u["x"] - cx)
             elif self.player_id == 3: rwx, rwy = cx - (u["y"] - cy), cy + (u["x"] - cx)
@@ -839,10 +860,11 @@ class ClientApp:
 
         for i, (name, cost) in enumerate(SHOP_ITEMS):
             rect = pygame.Rect(260 + i * 105, 550, 100, 38)
-            pygame.draw.rect(SCREEN, (50, 50, 75), rect, border_radius=4)
+            # Highlight green if selected[cite: 17]
+            bg_color = (80, 120, 80) if getattr(self, "selected_shop_item", None) == name else (50, 50, 75)
+            pygame.draw.rect(SCREEN, bg_color, rect, border_radius=4)
             SCREEN.blit(FONT.render(f"+ {name}", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
             SCREEN.blit(FONT.render(f"${cost}", True, (255, 215, 0)), (rect.x + 4, rect.y + 20))
-
         ready_rect = pygame.Rect(820, 550, 110, 38)
         pygame.draw.rect(SCREEN, (0, 180, 0) if self.ready_map.get(self.player_id, False) else (190, 40, 40), ready_rect, border_radius=4)
         SCREEN.blit(BIG_FONT.render("READY", True, (255, 255, 255)), (ready_rect.x + 25, ready_rect.y + 7))

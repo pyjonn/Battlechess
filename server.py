@@ -390,106 +390,66 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
-            utype = msg["unit_type"]
-            cost = costs.get(utype, 100)
+                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
+                    utype = msg["unit_type"]
+                    cost = costs.get(utype, 100)
 
-            if self.gold.get(pid, 0) >= cost:
-                self.gold[pid] -= cost
-                king = next((u for u in self.units if u["owner"] == pid and u["type"] == "King"), None)
-                king_positions = {0: (400, 120), 1: (400, 680), 2: (120, 400), 3: (680, 400)}
-                center_x = king["x"] if king else king_positions.get(pid, (400, 400))[0]
-                center_y = king["y"] if king else king_positions.get(pid, (400, 400))[1]
+                    # Ensure they have gold AND provided coordinates[cite: 18]
+                    if self.gold.get(pid, 0) >= cost and "x" in msg and "y" in msg:
+                        spawn_x, spawn_y = msg["x"], msg["y"]
 
-                tile_pixel_size = 800.0 / self.board_size
-                four_block_radius = int(2.0 * tile_pixel_size) / 2
-                spawn_x, spawn_y = center_x, center_y
-                search_radius = 10.0
-                found_spot = False
-
-                while search_radius < 800 and not found_spot:
-                    steps = max(12, int(search_radius / 4))
-                    for i in range(steps):
-                        angle = (i / steps) * math.pi * 2
-                        cx = max(20, min(780, center_x + math.cos(angle) * search_radius))
-                        cy = max(20, min(780, center_y + math.sin(angle) * search_radius))
-                        terrain_height = get_height_at_pos(cx, cy, self.heightmap, self.board_size)
+                        # Prevent placing units in the water[cite: 18]
+                        terrain_height = get_height_at_pos(spawn_x, spawn_y, self.heightmap, self.board_size)
                         if terrain_height <= self.water_level:
-                            continue
+                            return
 
-                        too_close = False
-                        for u in self.units:
-                            if math.hypot(u["x"] - cx, u["y"] - cy) <= (u["radius"] + four_block_radius + 0.1):
-                                too_close = True
-                                break
+                        # Deduct gold[cite: 18]
+                        self.gold[pid] -= cost
 
-                        if not too_close:
-                            spawn_x, spawn_y = cx, cy
-                            found_spot = True
-                            break
-                    search_radius += 10.0
+                        shapes = {
+                            "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
+                            "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
+                        }
+                        max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 300}
 
-                if not found_spot:
-                    valid_spots = []
-                    for r in range(self.board_size):
-                        for c in range(self.board_size):
-                            if self.heightmap[r][c] > self.water_level:
-                                vx = c * tile_pixel_size + (tile_pixel_size / 2)
-                                vy = r * tile_pixel_size + (tile_pixel_size / 2)
-                                valid_spots.append((vx, vy))
+                        tile_pixel_size = 800.0 / self.board_size
+                        four_block_radius = int(2.0 * tile_pixel_size) / 2
+                        draw_radii = {
+                            "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
+                            "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
+                            "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
+                        }
 
-                    if valid_spots:
-                        valid_spots.sort(key=lambda pos: math.hypot(pos[0] - center_x, pos[1] - center_y))
-                        spawn_x, spawn_y = valid_spots[0]
-                    else:
-                        spawn_x, spawn_y = center_x, center_y
+                        self.units.append({
+                            "id": self.next_unit_id,
+                            "owner": pid,
+                            "type": utype,
+                            "shape": shapes[utype],
+                            "x": spawn_x,
+                            "y": spawn_y,
+                            "target_x": spawn_x,
+                            "target_y": spawn_y,
+                            "hp": max_hps[utype],
+                            "max_hp": max_hps[utype],
+                            "angle": 0.0,
+                            "is_moving": False,
+                            "is_hit": False,
+                            "last_attack": 0,
+                            "target_unit": None,
+                            "draw_radius": draw_radii[utype],
+                            "radius": four_block_radius,
+                            "vx": 0.0,
+                            "vy": 0.0
+                        })
+                        self.next_unit_id += 1
 
-                shapes = {
-                    "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
-                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
-                }
-                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 300}
-                draw_radii = {
-                    "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
-                    "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
-                    "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
-                }
-                collision_radii = {
-                    "Pawn": four_block_radius, "Knight": four_block_radius,
-                    "Bishop": four_block_radius, "Healer": four_block_radius,
-                    "Rook": four_block_radius, "Queen": four_block_radius
-                }
-
-                self.units.append({
-                    "id": self.next_unit_id,
-                    "owner": pid,
-                    "type": utype,
-                    "shape": shapes[utype],
-                    "x": spawn_x,
-                    "y": spawn_y,
-                    "target_x": spawn_x,
-                    "target_y": spawn_y,
-                    "hp": max_hps[utype],
-                    "max_hp": max_hps[utype],
-                    "angle": 0.0,
-                    "is_moving": False,
-                    "is_hit": False,
-                    "last_attack": 0,
-                    "target_unit": None,
-                    "draw_radius": draw_radii[utype],
-                    "radius": collision_radii[utype],
-                    "vx": 0.0,
-                    "vy": 0.0
-                })
-                self.next_unit_id += 1
-
-                self.broadcast({
-                    "type": "SHOP_UPDATE",
-                    "units": self.units,
-                    "gold": self.gold,
-                    "ready": self.ready,
-                    "heightmap": self.heightmap
-                })
+                        self.broadcast({
+                            "type": "SHOP_UPDATE",
+                            "units": self.units,
+                            "gold": self.gold,
+                            "ready": self.ready,
+                            "heightmap": self.heightmap
+                        })
 
         elif mtype == "READY_SHOP" and self.state == "SHOP":
             self.ready[pid] = True
@@ -727,6 +687,10 @@ class Server:
                     alive_projectiles.append(p)
 
             self.projectiles = alive_projectiles
+            dead_kings_owners = [u["owner"] for u in self.units if u["type"] == "King" and u["hp"] <= 0]
+            for u in self.units:
+                if u["owner"] in dead_kings_owners:
+                    u["hp"] = 0
             self.units = [u for u in self.units if u["hp"] > 0]
 
             alive_teams = set()
