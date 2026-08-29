@@ -610,7 +610,7 @@ class ClientApp:
                 scale = self.zoom * (500.0 / WORLD_SIZE)
                 max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
                 self.camera_x = max(0.0, min(max_cam, self.pan_start_cam[0] - dx / scale))
-                self.camera_y = max(0.0, min(max_cam, self.camera_y - dy / scale))
+                self.camera_y = max(0.0, min(max_cam, self.pan_start_cam[1] - dy / scale))
 
     def handle_common_board_events(self, event):
         if event.type == pygame.KEYDOWN:
@@ -741,118 +741,118 @@ class ClientApp:
         SCREEN.set_clip(None)
 
     def draw_units_and_projectiles(self):
-            board_rect = pygame.Rect(260, 40, 500, 500)
-            SCREEN.set_clip(board_rect)
+        board_rect = pygame.Rect(260, 40, 500, 500)
+        SCREEN.set_clip(board_rect)
 
-            # Draw destination and path lines for moving units
-            for u in self.units:
-                if u["owner"] == self.player_id and u.get("is_moving", False):
-                    start_sx, start_sy = self.to_screen_coords(u["x"], u["y"])
-                    path_points = [(start_sx, start_sy)]
+        # Draw destination and path lines for moving units
+        for u in self.units:
+            if u["owner"] == self.player_id and u.get("is_moving", False):
+                start_sx, start_sy = self.to_screen_coords(u["x"], u["y"])
+                path_points = [(start_sx, start_sy)]
 
-                    # Add immediate target coordinate
-                    if "target_x" in u and "target_y" in u:
-                        tsx, tsy = self.to_screen_coords(u["target_x"], u["target_y"])
-                        path_points.append((tsx, tsy))
+                # Add immediate target coordinate
+                if "target_x" in u and "target_y" in u:
+                    tsx, tsy = self.to_screen_coords(u["target_x"], u["target_y"])
+                    path_points.append((tsx, tsy))
 
-                    # Add any remaining queued waypoints
-                    waypoints = u.get("waypoints", [])
-                    for wp in waypoints[1:]:
-                        wsx, wsy = self.to_screen_coords(wp[0], wp[1])
-                        path_points.append((wsx, wsy))
+                # Add any remaining queued waypoints
+                waypoints = u.get("waypoints", [])
+                for wp in waypoints[1:]:
+                    wsx, wsy = self.to_screen_coords(wp[0], wp[1])
+                    path_points.append((wsx, wsy))
 
-                    if len(path_points) > 1:
-                        is_selected = u["id"] in self.selected_units
-                        line_color = (0, 255, 120) if is_selected else (140, 180, 140)
-                        line_width = 2 if is_selected else 1
+                if len(path_points) > 1:
+                    is_selected = u["id"] in self.selected_units
+                    line_color = (0, 255, 120) if is_selected else (140, 180, 140)
+                    line_width = 2 if is_selected else 1
 
-                        # Draw path line connecting unit to target points
-                        pygame.draw.lines(
-                            SCREEN,
-                            line_color,
-                            False,
-                            [(int(px), int(py)) for px, py in path_points],
-                            line_width
-                        )
+                    # Draw path line connecting unit to target points
+                    pygame.draw.lines(
+                        SCREEN,
+                        line_color,
+                        False,
+                        [(int(px), int(py)) for px, py in path_points],
+                        line_width
+                    )
 
-                        # Draw destination marker at the end of the path
-                        end_x, end_y = path_points[-1]
-                        pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
+                    # Draw destination marker at the end of the path
+                    end_x, end_y = path_points[-1]
+                    pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
 
-            for p in self.particles:
-                sx, sy = self.to_screen_coords(p["x"], p["y"])
-                radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
-                pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
+        for p in self.particles:
+            sx, sy = self.to_screen_coords(p["x"], p["y"])
+            radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
+            pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
-            for p in self.projectiles:
-                sx, sy = self.to_screen_coords(p["x"], p["y"])
-                s_angle = self.to_screen_angle(p["angle"])
-                end_x = sx + int(10 * self.zoom * math.cos(s_angle))
-                end_y = sy + int(10 * self.zoom * math.sin(s_angle))
-                pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
+        for p in self.projectiles:
+            sx, sy = self.to_screen_coords(p["x"], p["y"])
+            s_angle = self.to_screen_angle(p["angle"])
+            end_x = sx + int(10 * self.zoom * math.cos(s_angle))
+            end_y = sy + int(10 * self.zoom * math.sin(s_angle))
+            pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
 
-            for u in self.units:
-                if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
-                    continue
+        for u in self.units:
+            if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
+                continue
 
-                sx, sy = self.to_screen_coords(u["x"], u["y"])
-                s_angle = self.to_screen_angle(u["angle"])
-                color = self.get_player_color(u["owner"])
+            sx, sy = self.to_screen_coords(u["x"], u["y"])
+            s_angle = self.to_screen_angle(u["angle"])
+            color = self.get_player_color(u["owner"])
 
-                block_width = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
-                radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
-                draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
-                collision_radius = draw_radius
+            block_width = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
+            radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
+            draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
+            collision_radius = draw_radius
 
-                if not u.get("is_moving", False):
-                    foot_offset = 0
-                    left_foot_x = sx - math.sin(s_angle) * (draw_radius * 0.6) + math.cos(s_angle) * foot_offset
-                    left_foot_y = sy + math.cos(s_angle) * (draw_radius * 0.6) + math.sin(s_angle) * foot_offset
-                    right_foot_x = sx + math.sin(s_angle) * (draw_radius * 0.6) - math.cos(s_angle) * foot_offset
-                    right_foot_y = sy - math.cos(s_angle) * (draw_radius * 0.6) - math.sin(s_angle) * foot_offset
+            if not u.get("is_moving", False):
+                foot_offset = 0
+                left_foot_x = sx - math.sin(s_angle) * (draw_radius * 0.6) + math.cos(s_angle) * foot_offset
+                left_foot_y = sy + math.cos(s_angle) * (draw_radius * 0.6) + math.sin(s_angle) * foot_offset
+                right_foot_x = sx + math.sin(s_angle) * (draw_radius * 0.6) - math.cos(s_angle) * foot_offset
+                right_foot_y = sy - math.cos(s_angle) * (draw_radius * 0.6) - math.sin(s_angle) * foot_offset
 
-                    foot_radius = max(1, int(draw_radius * 0.25))
-                    pygame.draw.circle(SCREEN, (20, 20, 20), (int(left_foot_x), int(left_foot_y)), foot_radius)
-                    pygame.draw.circle(SCREEN, (20, 20, 20), (int(right_foot_x), int(right_foot_y)), foot_radius)
+                foot_radius = max(1, int(draw_radius * 0.25))
+                pygame.draw.circle(SCREEN, (20, 20, 20), (int(left_foot_x), int(left_foot_y)), foot_radius)
+                pygame.draw.circle(SCREEN, (20, 20, 20), (int(right_foot_x), int(right_foot_y)), foot_radius)
 
-                if u["id"] in self.selected_units:
-                    pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
+            if u["id"] in self.selected_units:
+                pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
 
-                shape = u["shape"]
-                draw_color = (255, 255, 255) if u.get("is_hit", False) else color
-                if shape == "circle":
-                    pygame.draw.circle(SCREEN, draw_color, (int(sx), int(sy)), draw_radius)
-                elif shape == "square":
-                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - draw_radius, draw_radius * 2, draw_radius * 2))
-                elif shape == "cross":
-                    th = max(2, int(draw_radius * 0.6))
-                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - th//2, int(sy) - draw_radius, th, draw_radius * 2))
-                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - th//2, draw_radius * 2, th))
-                else:
-                    sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
-                    points = [(sx + draw_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + draw_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
-                    pygame.draw.polygon(SCREEN, draw_color, points)
+            shape = u["shape"]
+            draw_color = (255, 255, 255) if u.get("is_hit", False) else color
+            if shape == "circle":
+                pygame.draw.circle(SCREEN, draw_color, (int(sx), int(sy)), draw_radius)
+            elif shape == "square":
+                pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - draw_radius, draw_radius * 2, draw_radius * 2))
+            elif shape == "cross":
+                th = max(2, int(draw_radius * 0.6))
+                pygame.draw.rect(SCREEN, draw_color, (int(sx) - th//2, int(sy) - draw_radius, th, draw_radius * 2))
+                pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - th//2, draw_radius * 2, th))
+            else:
+                sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
+                points = [(sx + draw_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + draw_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
+                pygame.draw.polygon(SCREEN, draw_color, points)
 
-                hp_ratio = max(0, u["hp"] / u["max_hp"])
-                bar_w = max(10, draw_radius * 2)
-                pygame.draw.rect(SCREEN, (255, 0, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, bar_w, 3))
-                pygame.draw.rect(SCREEN, (0, 255, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, int(bar_w * hp_ratio), 3))
+            hp_ratio = max(0, u["hp"] / u["max_hp"])
+            bar_w = max(10, draw_radius * 2)
+            pygame.draw.rect(SCREEN, (255, 0, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, bar_w, 3))
+            pygame.draw.rect(SCREEN, (0, 255, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, int(bar_w * hp_ratio), 3))
 
-                stick_length = draw_radius * 1.5
-                end_x = sx + math.cos(s_angle) * stick_length
-                end_y = sy + math.sin(s_angle) * stick_length
-                pygame.draw.line(SCREEN, (0, 0, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
+            stick_length = draw_radius * 1.5
+            end_x = sx + math.cos(s_angle) * stick_length
+            end_y = sy + math.sin(s_angle) * stick_length
+            pygame.draw.line(SCREEN, (0, 0, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
 
-                if u["type"] == "King":
-                    p_name = self.usernames.get(u["owner"], f"Player {u['owner'] + 1}")
-                    tag_surf = FONT.render(f"👑 {p_name}", True, (255, 255, 255))
-                    bg_rect = pygame.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
-                    bg_rect.center = (int(sx), int(sy) - draw_radius - 18)
-                    pygame.draw.rect(SCREEN, (0, 0, 0, 180), bg_rect, border_radius=3)
-                    pygame.draw.rect(SCREEN, color, bg_rect, width=1, border_radius=3)
-                    SCREEN.blit(tag_surf, (bg_rect.x + 4, bg_rect.y + 2))
+            if u["type"] == "King":
+                p_name = self.usernames.get(u["owner"], f"Player {u['owner'] + 1}")
+                tag_surf = FONT.render(f"👑 {p_name}", True, (255, 255, 255))
+                bg_rect = pygame.Rect(0, 0, tag_surf.get_width() + 8, tag_surf.get_height() + 4)
+                bg_rect.center = (int(sx), int(sy) - draw_radius - 18)
+                pygame.draw.rect(SCREEN, (0, 0, 0, 180), bg_rect, border_radius=3)
+                pygame.draw.rect(SCREEN, color, bg_rect, width=1, border_radius=3)
+                SCREEN.blit(tag_surf, (bg_rect.x + 4, bg_rect.y + 2))
 
-            SCREEN.set_clip(None)
+        SCREEN.set_clip(None)
 
     def draw_sidebar(self):
         sidebar_rect = pygame.Rect(0, 0, 250, HEIGHT)

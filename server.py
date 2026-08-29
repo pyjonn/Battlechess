@@ -67,6 +67,44 @@ def sample_smooth_noise(grid, x, y):
     bottom = v01 + sx * (v11 - v01)
     return top + sy * (bottom - top)
 
+def find_nearest_enemy_in_path(unit, enemies, scan_radius=120):
+    """Finds the closest enemy within a scan radius or along the forward path."""
+    closest_enemy = None
+    min_dist = scan_radius
+
+    for enemy in enemies:
+        if enemy["owner"] == unit["owner"] or enemy["hp"] <= 0:
+            continue
+
+        dx = enemy["x"] - unit["x"]
+        dy = enemy["y"] - unit["y"]
+        dist = math.hypot(dx, dy)
+
+        if dist < min_dist:
+            min_dist = dist
+            closest_enemy = enemy
+
+    return closest_enemy
+
+def find_nearest_hurt_ally(unit, allies, scan_radius=250):
+    """Finds the closest damaged friendly unit within scan radius."""
+    closest_ally = None
+    min_dist = scan_radius
+
+    for ally in allies:
+        if ally["id"] == unit["id"] or ally["hp"] >= ally["max_hp"] or ally["hp"] <= 0:
+            continue
+
+        dx = ally["x"] - unit["x"]
+        dy = ally["y"] - unit["y"]
+        dist = math.hypot(dx, dy)
+
+        if dist < min_dist:
+            min_dist = dist
+            closest_ally = ally
+
+    return closest_ally
+
 def generate_heightmap(size, water_enabled, units=None, water_rising=False):
     logging.debug(f"Generating randomized heightmap for size {size}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
@@ -548,14 +586,12 @@ class Server:
                 center_x = sum(u["x"] for u in selected_group) / len(selected_group)
                 center_y = sum(u["y"] for u in selected_group) / len(selected_group)
 
-                # Determine minimum base speed among units to preserve formation
                 group_min_speed = min(get_unit_base_speed(u["type"]) for u in selected_group) if len(selected_group) > 1 else None
 
                 for u in selected_group:
                     offset_x = u["x"] - center_x
                     offset_y = u["y"] - center_y
 
-                    # Clamp offset destination to keep target within world boundaries
                     bounded_tx = max(u["radius"], min(800.0 - u["radius"], tx + offset_x))
                     bounded_ty = max(u["radius"], min(800.0 - u["radius"], ty + offset_y))
 
@@ -600,7 +636,23 @@ class Server:
 
             now = time.time()
 
-            # Unit-to-unit collision resolution with mass/weight weighting
+            # Auto-acquire targets for idle units
+            for u in self.units:
+                if u["hp"] <= 0:
+                    continue
+
+                curr_t_id = u.get("target_unit")
+                curr_t_valid = any(e["id"] == curr_t_id and e["hp"] > 0 for e in self.units) if curr_t_id else False
+
+                if not curr_t_valid and not u.get("waypoints"):
+                    if u["type"] == "Healer":
+                        # Auto-seek damaged allies
+                        allies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"])]
+                        hurt_ally = find_nearest_hurt_ally(u, allies)
+                        if hurt_ally:
+                            u["target_unit"] = hurt_ally["id"]
+
+            # Collision resolution
             for i in range(len(self.units)):
                 for j in range(i + 1, len(self.units)):
                     u1 = self.units[i]
@@ -615,12 +667,10 @@ class Server:
                         nx = dx / dist
                         ny = dy / dist
 
-                        # Fetch weights
                         w1 = UNIT_WEIGHTS.get(u1["type"], 1.0)
                         w2 = UNIT_WEIGHTS.get(u2["type"], 1.0)
                         total_weight = w1 + w2
 
-                        # Calculate push ratios inversely proportional to mass
                         ratio1 = w2 / total_weight
                         ratio2 = w1 / total_weight
 
@@ -640,7 +690,6 @@ class Server:
                     u["hp"] -= water_depth * 0.8
                     u["is_hit"] = True
 
-                # Synchronize waypoint state with unit objective targeting
                 if u.get("waypoints"):
                     current_wp = u["waypoints"][0]
                     wp_x, wp_y = current_wp[0], current_wp[1]
@@ -651,7 +700,6 @@ class Server:
                         if t_exists:
                             u["target_unit"] = wp_target_id
                         else:
-                            # Targeted enemy unit slain; convert waypoint objective to point destination
                             u["target_unit"] = None
                             u["waypoints"][0] = (wp_x, wp_y, None)
                             u["target_x"], u["target_y"] = wp_x, wp_y
@@ -662,7 +710,10 @@ class Server:
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
-                        if not target:
+                        if target and target["hp"] >= target["max_hp"]:
+                            u["target_unit"] = None
+                            target = None
+                        elif not target:
                             u["target_unit"] = None
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
@@ -672,6 +723,7 @@ class Server:
                         if friendlies:
                             friendlies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
                             target = friendlies[0]
+                            u["target_unit"] = target["id"]
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
@@ -680,11 +732,23 @@ class Server:
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    if not target and not u.get("target_unit") and not u.get("waypoints"):
+                    if not target and not u.get("target_unit") and not u.get("waypoints") and u["type"] != "Knight":
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                         if enemies:
                             enemies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
                             target = enemies[0]
+
+                if u["type"] == "Knight":
+                    archer_range = u["radius"] * 20.0
+                    # Archers do not auto-detect enemies. They only attack if a target_unit
+                    # was explicitly assigned by a player command.
+                    if target:
+                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
+                        # Stop moving if the player-assigned target is within bow range
+                        if e_dist <= archer_range:
+                            u["waypoints"] = []
+                            u["target_x"] = u["x"]
+                            u["target_y"] = u["y"]
 
                 if target and u.get("target_unit"):
                     u["target_x"] = target["x"]
@@ -722,20 +786,15 @@ class Server:
                     if not target or not has_cone_vision(u, target["x"], target["y"]):
                         desired_angle = math.atan2(dy, dx)
                         u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
-
-                    u["x"] = max(u["radius"], min(800 - u["radius"], u["x"]))
-                    u["y"] = max(u["radius"], min(800 - u["radius"], u["y"]))
                 else:
                     u["is_moving"] = False
                     u["vx"] = 0.0
                     u["vy"] = 0.0
 
-                    # Waypoint Queue Processing
                     if u.get("waypoints"):
                         current_wp = u["waypoints"][0]
                         wp_target_id = current_wp[2] if len(current_wp) > 2 else None
 
-                        # Advance to next waypoint only if target unit is dead/unspecified
                         if wp_target_id is None:
                             u["waypoints"].pop(0)
                             if u["waypoints"]:
@@ -747,7 +806,7 @@ class Server:
 
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                    u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
+                    u["angle"] = lerp_angle(u["angle"], desired_angle, 0.25 if not u["is_moving"] else 0.15)
                     e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                     can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
 
@@ -777,7 +836,7 @@ class Server:
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
                     elif u["type"] != "Block":
-                        attack_range = (u["radius"] + target["radius"] + 8)
+                        attack_range = (u["radius"] + target["radius"] + 14)
                         cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
                         damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
 
