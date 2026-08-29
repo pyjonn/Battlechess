@@ -478,17 +478,46 @@ class ClientApp:
 
     def handle_shop_events(self, event):
             self.handle_common_board_events(event)
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = event.pos
 
-                # 1. Place the selected unit on the board
-                if mx > 250 and my > 40 and self.selected_shop_item:
-                    wmx, wmy = self.to_world_coords(mx, my)
-                    self.send({
-                        "type": "BUY_UNIT",
-                        "unit_type": self.selected_shop_item,
-                        "x": wmx, "y": wmy
-                    })
+                # Left Click: Place Unit or Select Shop Item
+                if event.button == 1:
+                    if mx > 250 and my > 40 and self.selected_shop_item:
+                        wmx, wmy = self.to_world_coords(mx, my)
+
+                        # Validate placement on player's half of the board
+                        valid_side = True
+                        if self.player_id == 0 and wmy > 400: valid_side = False
+                        elif self.player_id == 1 and wmy < 400: valid_side = False
+                        elif self.player_id == 2 and wmx > 400: valid_side = False
+                        elif self.player_id == 3 and wmx < 400: valid_side = False
+
+                        if valid_side:
+                            self.send({
+                                "type": "BUY_UNIT",
+                                "unit_type": self.selected_shop_item,
+                                "x": wmx, "y": wmy
+                            })
+
+                    # Select unit from shop UI
+                    for i, (name, cost) in enumerate(SHOP_ITEMS):
+                        if pygame.Rect(260 + i * 105, 550, 100, 38).collidepoint(mx, my):
+                            self.selected_shop_item = name
+                            break
+
+                    if pygame.Rect(820, 550, 110, 38).collidepoint(mx, my):
+                        self.send({"type": "READY_SHOP"})
+
+                # Right Click: Sell Unit
+                elif event.button == 3:
+                    if mx > 250 and my > 40:
+                        wmx, wmy = self.to_world_coords(mx, my)
+                        for u in self.units:
+                            if u["owner"] == self.player_id and u["type"] != "King":
+                                if math.hypot(u["x"] - wmx, u["y"] - wmy) < 25:
+                                    self.send({"type": "SELL_UNIT", "unit_id": u["id"]})
+                                    break
 
                 # 2. Select unit from the shop[cite: 17]
                 for i, (name, cost) in enumerate(SHOP_ITEMS):
@@ -612,53 +641,66 @@ class ClientApp:
         return angle + rot
 
     def draw_board(self):
-        board_rect = pygame.Rect(260, 40, 500, 500)
-        SCREEN.set_clip(board_rect)
+            board_rect = pygame.Rect(260, 40, 500, 500)
+            SCREEN.set_clip(board_rect)
 
-        ts_world = WORLD_SIZE / float(self.board_size)
-        ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
-        rect_size = math.ceil(ts_screen) + 1
+            ts_world = WORLD_SIZE / float(self.board_size)
+            ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
+            rect_size = math.ceil(ts_screen) + 1
 
-        for r in range(self.board_size):
-            for c in range(self.board_size):
-                if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
-                    h = self.heightmap[r][c]
-                    if h <= self.water_level:
-                        color = (40, 120, 220)
+            for r in range(self.board_size):
+                for c in range(self.board_size):
+                    if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
+                        h = self.heightmap[r][c]
+                        if h <= self.water_level:
+                            color = (40, 120, 220)
+                        else:
+                            norm_h = max(0.0, min(1.0, (h - self.water_level) / (1.5 - self.water_level)))
+
+                            red_grass = int(25 + norm_h * 75)
+                            green_grass = int(105 + norm_h * 135)
+                            blue_grass = int(30 + norm_h * 45)
+
+                            stone_val = max(110, min(200, int(110 + norm_h * 90)))
+                            mountain_color = (stone_val, stone_val, stone_val + 10)
+
+                            blend = max(0.0, min(1.0, (h - 0.45) / 0.30))
+                            smooth_blend = blend * blend * (3 - 2 * blend)
+
+                            r_col = int(red_grass * (1 - smooth_blend) + mountain_color[0] * smooth_blend)
+                            g_col = int(min(255, green_grass) * (1 - smooth_blend) + mountain_color[1] * smooth_blend)
+                            b_col = int(blue_grass * (1 - smooth_blend) + mountain_color[2] * smooth_blend)
+
+                            color = (r_col, g_col, b_col)
                     else:
-                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (1.5 - self.water_level)))
+                        color = (105, 185, 85)
 
-                        red_grass = int(25 + norm_h * 75)
-                        green_grass = int(105 + norm_h * 135)
-                        blue_grass = int(30 + norm_h * 45)
+                    wx = c * ts_world + ts_world / 2.0
+                    wy = r * ts_world + ts_world / 2.0
 
-                        stone_val = max(110, min(200, int(110 + norm_h * 90)))
-                        mountain_color = (stone_val, stone_val, stone_val + 10)
+                    # Grey out enemy side during the shop phase
+                    if self.game_state == "SHOP":
+                        is_my_side = True
+                        if self.player_id == 0 and wy > 400: is_my_side = False
+                        elif self.player_id == 1 and wy < 400: is_my_side = False
+                        elif self.player_id == 2 and wx > 400: is_my_side = False
+                        elif self.player_id == 3 and wx < 400: is_my_side = False
 
-                        blend = max(0.0, min(1.0, (h - 0.45) / 0.30))
-                        smooth_blend = blend * blend * (3 - 2 * blend)
+                        if not is_my_side:
+                            gray = int(0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2])
+                            color = (int(gray * 0.4 + color[0] * 0.2), int(gray * 0.4 + color[1] * 0.2), int(gray * 0.4 + color[2] * 0.2))
 
-                        r_col = int(red_grass * (1 - smooth_blend) + mountain_color[0] * smooth_blend)
-                        g_col = int(min(255, green_grass) * (1 - smooth_blend) + mountain_color[1] * smooth_blend)
-                        b_col = int(blue_grass * (1 - smooth_blend) + mountain_color[2] * smooth_blend)
+                    sx, sy = self.to_screen_coords(wx, wy)
 
-                        color = (r_col, g_col, b_col)
-                else:
-                    color = (105, 185, 85)
+                    margin = rect_size
+                    if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
+                        continue
 
-                wx = c * ts_world + ts_world / 2.0
-                wy = r * ts_world + ts_world / 2.0
-                sx, sy = self.to_screen_coords(wx, wy)
+                    rect = pygame.Rect(0, 0, rect_size, rect_size)
+                    rect.center = (int(sx), int(sy))
+                    pygame.draw.rect(SCREEN, color, rect)
 
-                margin = rect_size
-                if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
-                    continue
-
-                rect = pygame.Rect(0, 0, rect_size, rect_size)
-                rect.center = (int(sx), int(sy))
-                pygame.draw.rect(SCREEN, color, rect)
-
-        SCREEN.set_clip(None)
+            SCREEN.set_clip(None)
 
     def draw_units_and_projectiles(self):
         board_rect = pygame.Rect(260, 40, 500, 500)

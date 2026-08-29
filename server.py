@@ -279,6 +279,25 @@ class Server:
             sender_name = self.usernames.get(pid, f"Player {pid + 1}")
             self.broadcast({"type": "CHAT", "sender": sender_name, "text": msg["text"]})
 
+        elif mtype == "SELL_UNIT" and self.state == "SHOP":
+            uid = msg.get("unit_id")
+            for i, u in enumerate(self.units):
+                # Verify the unit exists and belongs to the player requesting the refund
+                if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
+                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
+                    self.gold[pid] += costs.get(u["type"], 0)
+                    self.units.pop(i)
+
+                    # Push the updated game state to all clients
+                    self.broadcast({
+                        "type": "SHOP_UPDATE",
+                        "units": self.units,
+                        "gold": self.gold,
+                        "ready": self.ready,
+                        "heightmap": self.heightmap
+                    })
+                    break
+
         elif mtype == "TOGGLE_WIN_CONDITION" and pid == 0 and self.state == "LOBBY":
             self.win_condition = "MOST_SCORE_AT_END" if self.win_condition == "LAST_MAN_STANDING" else "LAST_MAN_STANDING"
             self.broadcast({
@@ -394,16 +413,28 @@ class Server:
                     utype = msg["unit_type"]
                     cost = costs.get(utype, 100)
 
-                    # Ensure they have gold AND provided coordinates[cite: 18]
+                    # Ensure player has gold AND provided coordinates
                     if self.gold.get(pid, 0) >= cost and "x" in msg and "y" in msg:
                         spawn_x, spawn_y = msg["x"], msg["y"]
+                        if not (0 <= spawn_x <= 800 and 0 <= spawn_y <= 800):
+                            return
 
-                        # Prevent placing units in the water[cite: 18]
+                        # Server-side check for board placement boundary
+                        valid_side = True
+                        if pid == 0 and spawn_y > 400: valid_side = False
+                        elif pid == 1 and spawn_y < 400: valid_side = False
+                        elif pid == 2 and spawn_x > 400: valid_side = False
+                        elif pid == 3 and spawn_x < 400: valid_side = False
+
+                        if not valid_side:
+                            return
+
+                        # Prevent placing units in the water
                         terrain_height = get_height_at_pos(spawn_x, spawn_y, self.heightmap, self.board_size)
                         if terrain_height <= self.water_level:
                             return
 
-                        # Deduct gold[cite: 18]
+                        # Deduct gold
                         self.gold[pid] -= cost
 
                         shapes = {
