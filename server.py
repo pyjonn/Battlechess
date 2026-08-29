@@ -421,7 +421,7 @@ class Server:
                     my_team = p % 2
                     opp_team = 1 - my_team
                     if team_counts[my_team] == 1 and team_counts[opp_team] == 2:
-                        self.gold[p] = int(self.starting_gold * 2.2)
+                        self.gold[p] = int(self.starting_gold * 2.0)
                     else:
                         self.gold[p] = self.starting_gold
             else:
