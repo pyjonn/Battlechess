@@ -24,12 +24,12 @@ UNIT_SCORES = {
 
 UNIT_WEIGHTS = {
     "Pawn": 1.0,
-    "Knight": 0.5,
-    "Bishop": 0.25,
-    "Healer": 0.5,
-    "King": 1.0,
-    "Rook": 2.5,
-    "Block": 2.5,
+    "Knight": 0.8,
+    "Bishop": 0.9,  # Increased from 0.25 to prevent extreme displacement
+    "Healer": 0.8,
+    "King": 1.5,
+    "Rook": 3,
+    "Block": 3.5,
     "Queen": 2.5,
 }
 
@@ -67,13 +67,13 @@ def sample_smooth_noise(grid, x, y):
     bottom = v01 + sx * (v11 - v01)
     return top + sy * (bottom - top)
 
-def find_nearest_enemy_in_path(unit, enemies, scan_radius=120):
-    """Finds the closest enemy within a scan radius or along the forward path."""
+def find_nearest_enemy_in_path(unit, enemies, scan_radius=150.0):
+    """Finds the closest enemy within a scan radius."""
     closest_enemy = None
     min_dist = scan_radius
 
     for enemy in enemies:
-        if enemy["owner"] == unit["owner"] or enemy["hp"] <= 0:
+        if enemy["hp"] <= 0:
             continue
 
         dx = enemy["x"] - unit["x"]
@@ -86,7 +86,7 @@ def find_nearest_enemy_in_path(unit, enemies, scan_radius=120):
 
     return closest_enemy
 
-def find_nearest_hurt_ally(unit, allies, scan_radius=250):
+def find_nearest_hurt_ally(unit, allies, scan_radius=250.0):
     """Finds the closest damaged friendly unit within scan radius."""
     closest_ally = None
     min_dist = scan_radius
@@ -521,7 +521,16 @@ class Server:
                 max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Block": 250, "Rook": 200, "Queen": 300}
 
                 tile_pixel_size = 800.0 / self.board_size
-                four_block_radius = int(2.0 * tile_pixel_size) / 2
+                radius_multipliers = {
+                    "Pawn": 0.9,
+                    "Knight": 1.0,
+                    "Bishop": 1.1,
+                    "Healer": 1.0,
+                    "Block": 1.2,
+                    "Rook": 1.2,
+                    "Queen": 1.3
+                }
+                four_block_radius = (int(2.0 * tile_pixel_size) / 2) * radius_multipliers.get(utype, 1.0)
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
@@ -636,48 +645,33 @@ class Server:
 
             now = time.time()
 
-            # Auto-acquire targets for idle units
-            for u in self.units:
-                if u["hp"] <= 0:
-                    continue
+            # Multi-pass collision resolution
+            for _ in range(3):
+                for i in range(len(self.units)):
+                    for j in range(i + 1, len(self.units)):
+                        u1 = self.units[i]
+                        u2 = self.units[j]
+                        dx = u2["x"] - u1["x"]
+                        dy = u2["y"] - u1["y"]
+                        dist = math.hypot(dx, dy)
+                        min_dist = u1["radius"] + u2["radius"]
 
-                curr_t_id = u.get("target_unit")
-                curr_t_valid = any(e["id"] == curr_t_id and e["hp"] > 0 for e in self.units) if curr_t_id else False
+                        if 0 < dist < min_dist:
+                            overlap = min_dist - dist
+                            nx = dx / dist
+                            ny = dy / dist
 
-                if not curr_t_valid and not u.get("waypoints"):
-                    if u["type"] == "Healer":
-                        # Auto-seek damaged allies
-                        allies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"])]
-                        hurt_ally = find_nearest_hurt_ally(u, allies)
-                        if hurt_ally:
-                            u["target_unit"] = hurt_ally["id"]
+                            w1 = UNIT_WEIGHTS.get(u1["type"], 1.0)
+                            w2 = UNIT_WEIGHTS.get(u2["type"], 1.0)
+                            total_weight = w1 + w2
 
-            # Collision resolution
-            for i in range(len(self.units)):
-                for j in range(i + 1, len(self.units)):
-                    u1 = self.units[i]
-                    u2 = self.units[j]
-                    dx = u2["x"] - u1["x"]
-                    dy = u2["y"] - u1["y"]
-                    dist = math.hypot(dx, dy)
-                    min_dist = u1["radius"] + u2["radius"]
+                            ratio1 = w2 / total_weight
+                            ratio2 = w1 / total_weight
 
-                    if 0 < dist < min_dist:
-                        overlap = min_dist - dist
-                        nx = dx / dist
-                        ny = dy / dist
-
-                        w1 = UNIT_WEIGHTS.get(u1["type"], 1.0)
-                        w2 = UNIT_WEIGHTS.get(u2["type"], 1.0)
-                        total_weight = w1 + w2
-
-                        ratio1 = w2 / total_weight
-                        ratio2 = w1 / total_weight
-
-                        u1["x"] -= nx * (overlap * ratio1)
-                        u1["y"] -= ny * (overlap * ratio1)
-                        u2["x"] += nx * (overlap * ratio2)
-                        u2["y"] += ny * (overlap * ratio2)
+                            u1["x"] -= nx * (overlap * ratio1)
+                            u1["y"] -= ny * (overlap * ratio1)
+                            u2["x"] += nx * (overlap * ratio2)
+                            u2["y"] += ny * (overlap * ratio2)
 
             for u in self.units:
                 u["is_hit"] = False
@@ -707,6 +701,7 @@ class Server:
                         u["target_unit"] = None
                         u["target_x"], u["target_y"] = wp_x, wp_y
 
+                # Auto-acquire targets for idle or moving units
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
@@ -718,12 +713,12 @@ class Server:
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    if not target and not u.get("target_unit") and not u.get("waypoints"):
+                    if not target and not u.get("target_unit"):
                         friendlies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"]) and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
-                        if friendlies:
-                            friendlies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
-                            target = friendlies[0]
+                        target = find_nearest_hurt_ally(u, friendlies)
+                        if target:
                             u["target_unit"] = target["id"]
+
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
@@ -732,23 +727,22 @@ class Server:
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
 
-                    if not target and not u.get("target_unit") and not u.get("waypoints") and u["type"] != "Knight":
+                    # Automatically acquire nearest enemy in path/range if no current explicit target
+                    if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        if enemies:
-                            enemies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
-                            target = enemies[0]
+                        scan_range = u["radius"] * 20.0 if u["type"] == "Knight" else 150.0
+                        closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range)
+                        if closest_enemy:
+                            target = closest_enemy
+                            u["target_unit"] = target["id"]
 
-                if u["type"] == "Knight":
+                if u["type"] == "Knight" and target:
                     archer_range = u["radius"] * 20.0
-                    # Archers do not auto-detect enemies. They only attack if a target_unit
-                    # was explicitly assigned by a player command.
-                    if target:
-                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
-                        # Stop moving if the player-assigned target is within bow range
-                        if e_dist <= archer_range:
-                            u["waypoints"] = []
-                            u["target_x"] = u["x"]
-                            u["target_y"] = u["y"]
+                    e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
+                    if e_dist <= archer_range:
+                        u["waypoints"] = []
+                        u["target_x"] = u["x"]
+                        u["target_y"] = u["y"]
 
                 if target and u.get("target_unit"):
                     u["target_x"] = target["x"]
