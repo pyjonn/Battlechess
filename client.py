@@ -27,7 +27,7 @@ except Exception:
     BOW_SOUND = None
 
 try:
-    MELEE_SOUND = pygame.mixer.Sound("melee.wav")
+    MELEE_SOUND = pygame.mixer.Sound("melee.ogg")
 except Exception:
     MELEE_SOUND = None
 
