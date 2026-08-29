@@ -8,6 +8,7 @@ Nerf pawns, denerf queens.
 
 # Features
 
+Rooks need to be heavier
 Use middle click to make a route for a unit
 Able to see where the unit is going
 Players can't see each other during buying phase
