@@ -534,39 +534,72 @@ class ClientApp:
             smx, smy = event.pos
             if event.button == 1:
                 if smx > 250 and smy > 40:
-                    wmx, wmy = self.to_world_coords(smx, smy)
                     self.drag_start = (smx, smy)
-                    if not (pygame.key.get_mods() & pygame.KMOD_SHIFT):
-                        self.selected_units.clear()
+
+            elif event.button == 3:  # Right Click Command
+                if smx > 250 and smy > 40 and self.selected_units:
+                    wmx, wmy = self.to_world_coords(smx, smy)
+                    is_shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
+
+                    target_unit_id = None
                     for u in self.units:
-                        if u["owner"] == self.player_id:
-                            u_blocks = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
-                            u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
-                            if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
-                                self.selected_units.add(u["id"])
-            elif event.button == 3:
+                        u_blocks = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
+                        u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
+                        if math.hypot(u["x"] - wmx, u["y"] - wmy) < u_radius_world:
+                            target_unit_id = u["id"]
+                            break
+
+                    self.send({
+                        "type": "COMMAND",
+                        "unit_ids": list(self.selected_units),
+                        "target_pos": [wmx, wmy],
+                        "target_unit": target_unit_id,
+                        "append_path": is_shift
+                    })
+
+            elif event.button == 2:  # Middle Click Pan
                 if smx > 250 and smy > 40:
                     self.right_dragging = True
                     self.pan_start_pos = (smx, smy)
                     self.pan_start_cam = (self.camera_x, self.camera_y)
 
         elif event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1 and self.drag_start:
-                smx, smy = event.pos
-                if self.drag_start[0] > 250 and smx > 250 and self.drag_start[1] > 40 and smy > 40:
-                    sx1, sx2 = min(self.drag_start[0], smx), max(self.drag_start[0], smx)
-                    sy1, sy2 = min(self.drag_start[1], smy), max(self.drag_start[1], smy)
-                    if abs(sx2 - sx1) > 5 or abs(sy2 - sy1) > 5:
-                        for u in self.units:
-                            if u["owner"] == self.player_id:
-                                ux, uy = self.to_screen_coords(u["x"], u["y"])
-                                if sx1 <= ux <= sx2 and sy1 <= uy <= sy2:
-                                    self.selected_units.add(u["id"])
-                self.drag_start = None
-            elif event.button == 3:
+            smx, smy = event.pos
+            if event.button == 1:
+                if self.drag_start:
+                    start_x, start_y = self.drag_start
+                    self.drag_start = None
+
+                    if smx > 250 and smy > 40 and start_x > 250 and start_y > 40:
+                        is_shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
+
+                        # Small drag distance is treated as a single click
+                        if abs(smx - start_x) < 5 and abs(smy - start_y) < 5:
+                            wmx, wmy = self.to_world_coords(smx, smy)
+                            if not is_shift:
+                                self.selected_units.clear()
+                            for u in self.units:
+                                if u["owner"] == self.player_id:
+                                    u_blocks = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
+                                    u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
+                                    if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
+                                        self.selected_units.add(u["id"])
+                        else:
+                            # Drag box selection
+                            if not is_shift:
+                                self.selected_units.clear()
+                            min_x, max_x = min(start_x, smx), max(start_x, smx)
+                            min_y, max_y = min(start_y, smy), max(start_y, smy)
+                            select_rect = pygame.Rect(min_x, min_y, max_x - min_x, max_y - min_y)
+
+                            for u in self.units:
+                                if u["owner"] == self.player_id:
+                                    usx, usy = self.to_screen_coords(u["x"], u["y"])
+                                    if select_rect.collidepoint(usx, usy):
+                                        self.selected_units.add(u["id"])
+
+            elif event.button == 2:  # Middle Click Release
                 self.right_dragging = False
-                self.pan_start_pos = None
-                self.pan_start_cam = None
 
         elif event.type == pygame.MOUSEMOTION:
             if self.right_dragging and self.pan_start_pos and self.pan_start_cam:
@@ -576,7 +609,7 @@ class ClientApp:
                 scale = self.zoom * (500.0 / WORLD_SIZE)
                 max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
                 self.camera_x = max(0.0, min(max_cam, self.pan_start_cam[0] - dx / scale))
-                self.camera_y = max(0.0, min(max_cam, self.pan_start_cam[1] - dy / scale))
+                self.camera_y = max(0.0, min(max_cam, self.camera_y - dy / scale))
 
     def handle_common_board_events(self, event):
         if event.type == pygame.KEYDOWN:

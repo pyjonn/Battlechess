@@ -384,6 +384,7 @@ class Server:
                     "y": ky,
                     "target_x": kx,
                     "target_y": ky,
+                    "waypoints": [],
                     "hp": 300,
                     "max_hp": 300,
                     "angle": kang,
@@ -476,6 +477,7 @@ class Server:
                     "y": spawn_y,
                     "target_x": spawn_x,
                     "target_y": spawn_y,
+                    "waypoints": [],
                     "hp": max_hps[utype],
                     "max_hp": max_hps[utype],
                     "angle": 0.0,
@@ -516,25 +518,31 @@ class Server:
             u_ids = msg.get("unit_ids", [])
             tx, ty = msg["target_pos"]
             t_unit = msg.get("target_unit")
+            append_path = msg.get("append_path", False)
             selected_group = [u for u in self.units if u["owner"] == pid and u["id"] in u_ids]
 
             if selected_group:
-                if t_unit is not None:
-                    target_obj = next((e for e in self.units if e["id"] == t_unit), None)
-                    for u in selected_group:
+                center_x = sum(u["x"] for u in selected_group) / len(selected_group)
+                center_y = sum(u["y"] for u in selected_group) / len(selected_group)
+
+                for u in selected_group:
+                    offset_x = u["x"] - center_x
+                    offset_y = u["y"] - center_y
+                    wp = (tx + offset_x, ty + offset_y)
+
+                    if "waypoints" not in u:
+                        u["waypoints"] = []
+
+                    if not append_path:
+                        # Clear existing waypoints and override current destination
+                        u["waypoints"] = [wp]
                         u["target_unit"] = t_unit
-                        if target_obj:
-                            u["target_x"] = target_obj["x"]
-                            u["target_y"] = target_obj["y"]
-                else:
-                    center_x = sum(u["x"] for u in selected_group) / len(selected_group)
-                    center_y = sum(u["y"] for u in selected_group) / len(selected_group)
-                    for u in selected_group:
-                        offset_x = u["x"] - center_x
-                        offset_y = u["y"] - center_y
-                        u["target_x"] = tx + offset_x
-                        u["target_y"] = ty + offset_y
-                        u["target_unit"] = None
+                        u["target_x"], u["target_y"] = wp
+                    else:
+                        # Append new point to the path queue
+                        u["waypoints"].append(wp)
+                        if len(u["waypoints"]) == 1:
+                            u["target_x"], u["target_y"] = wp
 
     def is_enemy(self, owner1, owner2):
         if self.game_mode == "2v2":
@@ -663,6 +671,13 @@ class Server:
                     u["is_moving"] = False
                     u["vx"] = 0.0
                     u["vy"] = 0.0
+
+                    # Waypoint Queue Processing
+                    if u.get("waypoints"):
+                        u["waypoints"].pop(0)  # Reached current waypoint
+                        if u["waypoints"]:
+                            next_wp = u["waypoints"][0]
+                            u["target_x"], u["target_y"] = next_wp
 
                 if target:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
