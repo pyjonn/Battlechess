@@ -11,7 +11,6 @@ import logging
 HOST = "0.0.0.0"
 PORT = 5555
 
-# Point values awarded per unit type defeated
 UNIT_SCORES = {
     "Pawn": 1,
     "Knight": 2,
@@ -155,11 +154,12 @@ class Server:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((HOST, PORT))
         self.sock.listen(4)
-        self.usernames = {i: f"Player {i+1}" for i in range(4)}
+        self.usernames = {}
 
         self.clients = {}
-        self.scores = {i: 0 for i in range(4)}  # Tracks match wins
-        self.kills = {i: 0 for i in range(4)}   # Tracks defeated enemies
+        self.host_id = None
+        self.scores = {i: 0 for i in range(4)}
+        self.kills = {i: 0 for i in range(4)}
         self.board_size = 32
         self.fog_enabled = False
         self.water_rising_enabled = False
@@ -179,8 +179,15 @@ class Server:
         self.gold = {}
         self.ready = {}
         self.next_unit_id = 1
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         logging.info(f"Server initialized successfully on board size {self.board_size}x{self.board_size}")
+
+    def update_host(self):
+        if self.clients:
+            if self.host_id not in self.clients:
+                self.host_id = min(self.clients.keys())
+        else:
+            self.host_id = None
 
     def broadcast(self, msg):
         data = (json.dumps(msg) + "\n").encode('utf-8')
@@ -193,6 +200,7 @@ class Server:
                     if player_id in self.clients:
                         del self.clients[player_id]
 
+                    self.update_host()
                     self.state = "LOBBY"
                     self.units = []
                     logging.warning(f"Player {player_id} dropped mid-game. Ending match.")
@@ -201,13 +209,13 @@ class Server:
                             "type": "PLAYER_DISCONNECT",
                             "disconnected_id": player_id,
                             "scores": self.scores,
-                            "kills": self.kills
+                            "kills": self.kills,
+                            "host_id": self.host_id
                         }) + "\n").encode('utf-8'))
                     except:
                         pass
 
     def award_kill_score(self, killer_id, unit_type):
-        """Awards defeated enemy points to player/team."""
         points = UNIT_SCORES.get(unit_type, 1)
         if self.game_mode == "2v2":
             for p in self.kills:
@@ -218,7 +226,6 @@ class Server:
                 self.kills[killer_id] += points
 
     def award_win(self, winner_id):
-        """Awards match win to player/team."""
         if winner_id is None or winner_id < 0:
             return
         if self.game_mode == "2v2":
@@ -234,6 +241,7 @@ class Server:
         conn.sendall((json.dumps({
             "type": "INIT",
             "player_id": player_id,
+            "host_id": self.host_id,
             "scores": self.scores,
             "kills": self.kills,
             "usernames": self.usernames,
@@ -265,6 +273,14 @@ class Server:
             if player_id in self.clients:
                 del self.clients[player_id]
                 logging.info(f"Player {player_id} disconnected and removed from clients list.")
+            if player_id in self.usernames:
+                del self.usernames[player_id]
+            self.update_host()
+            self.broadcast({
+                "type": "USERNAMES_UPDATE",
+                "usernames": self.usernames,
+                "host_id": self.host_id
+            })
 
     def process_message(self, pid, msg):
         mtype = msg.get("type")
@@ -272,7 +288,11 @@ class Server:
             name = msg.get("username", f"Player {pid + 1}").strip()
             if name:
                 self.usernames[pid] = name
-                self.broadcast({"type": "USERNAMES_UPDATE", "usernames": self.usernames})
+                self.broadcast({
+                    "type": "USERNAMES_UPDATE",
+                    "usernames": self.usernames,
+                    "host_id": self.host_id
+                })
                 self.broadcast({"type": "CHAT", "sender": "System", "text": f"{name} joined the game!"})
 
         elif mtype == "CHAT":
@@ -282,13 +302,11 @@ class Server:
         elif mtype == "SELL_UNIT" and self.state == "SHOP":
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
-                # Verify the unit exists and belongs to the player requesting the refund
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
                     costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
-                    # Push the updated game state to all clients
                     self.broadcast({
                         "type": "SHOP_UPDATE",
                         "units": self.units,
@@ -298,7 +316,7 @@ class Server:
                     })
                     break
 
-        elif mtype == "TOGGLE_WIN_CONDITION" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "TOGGLE_WIN_CONDITION" and pid == self.host_id and self.state == "LOBBY":
             self.win_condition = "MOST_SCORE_AT_END" if self.win_condition == "LAST_MAN_STANDING" else "LAST_MAN_STANDING"
             self.broadcast({
                 "type": "SETTINGS_UPDATE",
@@ -309,7 +327,7 @@ class Server:
                 "heightmap": self.heightmap
             })
 
-        elif mtype == "SET_TARGET_SCORE" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "SET_TARGET_SCORE" and pid == self.host_id and self.state == "LOBBY":
             self.target_score = max(1, min(20, msg.get("target_score", 3)))
             self.broadcast({
                 "type": "SETTINGS_UPDATE",
@@ -320,29 +338,30 @@ class Server:
                 "heightmap": self.heightmap
             })
 
-        elif mtype == "SET_BOARD_SIZE" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "SET_BOARD_SIZE" and pid == self.host_id and self.state == "LOBBY":
             self.board_size = max(12, min(128, msg["size"]))
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
             self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
 
-        elif mtype == "SET_WATER_RISING" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "SET_WATER_RISING" and pid == self.host_id and self.state == "LOBBY":
             self.water_rising_enabled = msg["rising"]
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
             self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled, "heightmap": self.heightmap})
 
-        elif mtype == "SET_STARTING_GOLD" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "SET_STARTING_GOLD" and pid == self.host_id and self.state == "LOBBY":
             self.starting_gold = max(100, min(10000, msg["starting_gold"]))
             self.broadcast({"type": "GOLD_SETTING_UPDATE", "starting_gold": self.starting_gold})
 
-        elif mtype == "TOGGLE_MODE" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "TOGGLE_MODE" and pid == self.host_id and self.state == "LOBBY":
             self.game_mode = "2v2" if self.game_mode == "FFA" else "FFA"
             self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode, "win_condition": self.win_condition, "target_score": self.target_score})
 
-        elif mtype == "START_GAME" and pid == 0 and self.state == "LOBBY":
+        elif mtype == "START_GAME" and pid == self.host_id and self.state == "LOBBY":
             logging.info("Host started the game. Transitioning to SHOP phase.")
             self.state = "SHOP"
             self.water_level = -0.1 if self.water_enabled else -99.0
             self.units = []
+            self.kills = {i: 0 for i in range(4)}
 
             tile_pixel_size = 800.0 / self.board_size
             four_block_radius = int(2.0 * tile_pixel_size) / 2
@@ -405,82 +424,79 @@ class Server:
                 "heightmap": self.heightmap,
                 "water_level": self.water_level,
                 "units": self.units,
-                "gold": self.gold
+                "gold": self.gold,
+                "kills": self.kills
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
-                    utype = msg["unit_type"]
-                    cost = costs.get(utype, 100)
+            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
+            utype = msg["unit_type"]
+            cost = costs.get(utype, 100)
 
-                    # Ensure player has gold AND provided coordinates
-                    if self.gold.get(pid, 0) >= cost and "x" in msg and "y" in msg:
-                        spawn_x, spawn_y = msg["x"], msg["y"]
-                        if not (0 <= spawn_x <= 800 and 0 <= spawn_y <= 800):
-                            return
+            if self.gold.get(pid, 0) >= cost and "x" in msg and "y" in msg:
+                spawn_x, spawn_y = msg["x"], msg["y"]
+                if not (0 <= spawn_x <= 800 and 0 <= spawn_y <= 800):
+                    return
 
-                        # Server-side check for board placement boundary
-                        valid_side = True
-                        if pid == 0 and spawn_y > 400: valid_side = False
-                        elif pid == 1 and spawn_y < 400: valid_side = False
-                        elif pid == 2 and spawn_x > 400: valid_side = False
-                        elif pid == 3 and spawn_x < 400: valid_side = False
+                valid_side = True
+                if pid == 0 and spawn_y > 400: valid_side = False
+                elif pid == 1 and spawn_y < 400: valid_side = False
+                elif pid == 2 and spawn_x > 400: valid_side = False
+                elif pid == 3 and spawn_x < 400: valid_side = False
 
-                        if not valid_side:
-                            return
+                if not valid_side:
+                    return
 
-                        # Prevent placing units in the water
-                        terrain_height = get_height_at_pos(spawn_x, spawn_y, self.heightmap, self.board_size)
-                        if terrain_height <= self.water_level:
-                            return
+                terrain_height = get_height_at_pos(spawn_x, spawn_y, self.heightmap, self.board_size)
+                if terrain_height <= self.water_level:
+                    return
 
-                        # Deduct gold
-                        self.gold[pid] -= cost
+                self.gold[pid] -= cost
 
-                        shapes = {
-                            "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
-                            "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
-                        }
-                        max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 300}
+                shapes = {
+                    "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
+                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
+                }
+                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 300}
 
-                        tile_pixel_size = 800.0 / self.board_size
-                        four_block_radius = int(2.0 * tile_pixel_size) / 2
-                        draw_radii = {
-                            "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
-                            "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
-                            "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
-                        }
+                tile_pixel_size = 800.0 / self.board_size
+                four_block_radius = int(2.0 * tile_pixel_size) / 2
+                draw_radii = {
+                    "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
+                    "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
+                    "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
+                }
 
-                        self.units.append({
-                            "id": self.next_unit_id,
-                            "owner": pid,
-                            "type": utype,
-                            "shape": shapes[utype],
-                            "x": spawn_x,
-                            "y": spawn_y,
-                            "target_x": spawn_x,
-                            "target_y": spawn_y,
-                            "hp": max_hps[utype],
-                            "max_hp": max_hps[utype],
-                            "angle": 0.0,
-                            "is_moving": False,
-                            "is_hit": False,
-                            "last_attack": 0,
-                            "target_unit": None,
-                            "draw_radius": draw_radii[utype],
-                            "radius": four_block_radius,
-                            "vx": 0.0,
-                            "vy": 0.0
-                        })
-                        self.next_unit_id += 1
+                self.units.append({
+                    "id": self.next_unit_id,
+                    "owner": pid,
+                    "type": utype,
+                    "shape": shapes[utype],
+                    "x": spawn_x,
+                    "y": spawn_y,
+                    "target_x": spawn_x,
+                    "target_y": spawn_y,
+                    "hp": max_hps[utype],
+                    "max_hp": max_hps[utype],
+                    "angle": 0.0,
+                    "is_moving": False,
+                    "is_hit": False,
+                    "last_attack": 0,
+                    "target_unit": None,
+                    "draw_radius": draw_radii[utype],
+                    "radius": four_block_radius,
+                    "vx": 0.0,
+                    "vy": 0.0
+                })
+                self.next_unit_id += 1
 
-                        self.broadcast({
-                            "type": "SHOP_UPDATE",
-                            "units": self.units,
-                            "gold": self.gold,
-                            "ready": self.ready,
-                            "heightmap": self.heightmap
-                        })
+                self.broadcast({
+                    "type": "SHOP_UPDATE",
+                    "units": self.units,
+                    "gold": self.gold,
+                    "ready": self.ready,
+                    "heightmap": self.heightmap
+                })
 
         elif mtype == "READY_SHOP" and self.state == "SHOP":
             self.ready[pid] = True
@@ -492,7 +508,8 @@ class Server:
                     "units": self.units,
                     "board_size": self.board_size,
                     "heightmap": self.heightmap,
-                    "water_level": self.water_level
+                    "water_level": self.water_level,
+                    "kills": self.kills
                 })
 
         elif mtype == "COMMAND" and self.state == "IN_GAME":
@@ -683,14 +700,12 @@ class Server:
                         cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
                         damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
 
-                        # NEW:
                         if e_dist < attack_range and can_see and in_front and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
                             target["hp"] -= (damage_val + bonus_dmg)
-                            target["is_hit"] = True  # Visually shows unit being hit
+                            target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
 
-                            # Only award score if this specific hit kills the unit
                             if target["hp"] <= 0:
                                 self.award_kill_score(u["owner"], target["type"])
 
@@ -701,15 +716,13 @@ class Server:
                 p["life"] -= 1
                 hit = False
 
-                # NEW:
                 for u in self.units:
                     if u["hp"] > 0 and self.is_enemy(u["owner"], p["owner"]):
                         if math.hypot(u["x"] - p["x"], u["y"] - p["y"]) < (u["radius"] + 2):
                             u["hp"] -= p["damage"]
-                            u["is_hit"] = True  # Register unit hit
+                            u["is_hit"] = True
                             hit = True
 
-                            # Only award kill score if the projectile deal final lethal damage
                             if u["hp"] <= 0:
                                 self.award_kill_score(p["owner"], u["type"])
                             break
@@ -778,6 +791,13 @@ class Server:
                     continue
                 current_id = avail[0]
                 self.clients[current_id] = conn
+                self.usernames[current_id] = f"Player {current_id + 1}"
+                self.update_host()
+            self.broadcast({
+                "type": "USERNAMES_UPDATE",
+                "usernames": self.usernames,
+                "host_id": self.host_id
+            })
             threading.Thread(target=self.handle_client, args=(current_id, conn), daemon=True).start()
 
 if __name__ == "__main__":
