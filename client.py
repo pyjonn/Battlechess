@@ -63,7 +63,7 @@ if not FOOTSTEP_SOUNDS:
     FOOTSTEP_SOUNDS = [generate_noise(0.05, 0.15), generate_noise(0.05, 0.15)]
 
 MELEE_PITCHES = {
-    "Pawn": 1.2, "Bishop": 1.4, "Queen": 1.0, "King": 0.8, "Rook": 0.6, "Healer": 1.5
+    "Pawn": 1.2, "Bishop": 1.4, "Queen": 1.0, "King": 0.8, "Rook": 0.6, "Healer": 1.5, "Block": 0.5
 }
 
 def play_pitched_melee(unit_type):
@@ -83,6 +83,7 @@ SHOP_ITEMS = [
     ("Knight", 150),
     ("Bishop", 140),
     ("Healer", 180),
+    ("Block", 120),
     ("Rook", 250),
     ("Queen", 400)
 ]
@@ -512,7 +513,7 @@ class ClientApp:
                         })
 
                 for i, (name, cost) in enumerate(SHOP_ITEMS):
-                    if pygame.Rect(260 + i * 105, 550, 100, 38).collidepoint(mx, my):
+                    if pygame.Rect(260 + i * 95, 550, 90, 38).collidepoint(mx, my):
                         self.selected_shop_item = name
                         break
 
@@ -543,7 +544,7 @@ class ClientApp:
 
                     target_unit_id = None
                     for u in self.units:
-                        u_blocks = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
+                        u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
                         u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                         if math.hypot(u["x"] - wmx, u["y"] - wmy) < u_radius_world:
                             target_unit_id = u["id"]
@@ -580,7 +581,7 @@ class ClientApp:
                                 self.selected_units.clear()
                             for u in self.units:
                                 if u["owner"] == self.player_id:
-                                    u_blocks = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
+                                    u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
                                     u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
@@ -798,7 +799,7 @@ class ClientApp:
                 s_angle = self.to_screen_angle(u["angle"])
                 color = self.get_player_color(u["owner"])
 
-                block_width = 2.4 if u["type"] in ("Queen", "Rook") else 2.0
+                block_width = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
                 radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
                 draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
                 collision_radius = draw_radius
@@ -971,7 +972,7 @@ class ClientApp:
         SCREEN.blit(TITLE_FONT.render(f"Buy Phase - Gold: ${self.gold}", True, (255, 215, 0)), (265, 8))
 
         for i, (name, cost) in enumerate(SHOP_ITEMS):
-            rect = pygame.Rect(260 + i * 105, 550, 100, 38)
+            rect = pygame.Rect(260 + i * 95, 550, 90, 38)
             bg_color = (80, 120, 80) if getattr(self, "selected_shop_item", None) == name else (50, 50, 75)
             pygame.draw.rect(SCREEN, bg_color, rect, border_radius=4)
             SCREEN.blit(FONT.render(f"+ {name}", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))

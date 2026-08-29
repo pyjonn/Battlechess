@@ -16,9 +16,21 @@ UNIT_SCORES = {
     "Knight": 2,
     "Bishop": 2,
     "Healer": 2,
+    "Block": 2,
     "Rook": 3,
     "Queen": 4,
     "King": 5
+}
+
+UNIT_WEIGHTS = {
+    "Pawn": 1.0,
+    "Knight": 0.5,
+    "Bishop": 0.25,
+    "Healer": 0.5,
+    "King": 1.0,
+    "Rook": 2.5,
+    "Block": 2.5,
+    "Queen": 2.5,
 }
 
 def setup_logging(verbose):
@@ -152,8 +164,8 @@ def get_unit_base_speed(unit_type):
         return 3.2
     elif unit_type == "King":
         return 1.4
-    elif unit_type == "Rook":
-        return 1.2
+    elif unit_type in ("Rook", "Block"):
+        return 1.0
     return 2.2
 
 class Server:
@@ -312,7 +324,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
+                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Block": 120, "Rook": 250, "Queen": 400}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -440,7 +452,7 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Rook": 250, "Queen": 400}
+            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Block": 120, "Rook": 250, "Queen": 400}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
@@ -466,16 +478,16 @@ class Server:
 
                 shapes = {
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
-                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
+                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross", "Block": "square"
                 }
-                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 300}
+                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Block": 250, "Rook": 200, "Queen": 300}
 
                 tile_pixel_size = 800.0 / self.board_size
                 four_block_radius = int(2.0 * tile_pixel_size) / 2
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
-                    "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
+                    "Block": int(tile_pixel_size * 1.4), "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
                 }
 
                 self.units.append({
@@ -588,6 +600,7 @@ class Server:
 
             now = time.time()
 
+            # Unit-to-unit collision resolution with mass/weight weighting
             for i in range(len(self.units)):
                 for j in range(i + 1, len(self.units)):
                     u1 = self.units[i]
@@ -597,14 +610,24 @@ class Server:
                     dist = math.hypot(dx, dy)
                     min_dist = u1["radius"] + u2["radius"]
 
-                    if dist < min_dist and dist > 0:
+                    if 0 < dist < min_dist:
                         overlap = min_dist - dist
                         nx = dx / dist
                         ny = dy / dist
-                        u1["x"] -= nx * (overlap * 0.5)
-                        u1["y"] -= ny * (overlap * 0.5)
-                        u2["x"] += nx * (overlap * 0.5)
-                        u2["y"] += ny * (overlap * 0.5)
+
+                        # Fetch weights
+                        w1 = UNIT_WEIGHTS.get(u1["type"], 1.0)
+                        w2 = UNIT_WEIGHTS.get(u2["type"], 1.0)
+                        total_weight = w1 + w2
+
+                        # Calculate push ratios inversely proportional to mass
+                        ratio1 = w2 / total_weight
+                        ratio2 = w1 / total_weight
+
+                        u1["x"] -= nx * (overlap * ratio1)
+                        u1["y"] -= ny * (overlap * ratio1)
+                        u2["x"] += nx * (overlap * ratio2)
+                        u2["y"] += ny * (overlap * ratio2)
 
             for u in self.units:
                 u["is_hit"] = False
@@ -649,7 +672,7 @@ class Server:
                         if friendlies:
                             friendlies.sort(key=lambda e: math.hypot(e["x"] - u["x"], e["y"] - u["y"]))
                             target = friendlies[0]
-                else:
+                elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
                         if not target:
@@ -753,7 +776,7 @@ class Server:
                             target["hp"] = min(target["max_hp"], target["hp"] + 15)
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
-                    else:
+                    elif u["type"] != "Block":
                         attack_range = (u["radius"] + target["radius"] + 8)
                         cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
                         damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
