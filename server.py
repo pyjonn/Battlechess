@@ -448,7 +448,7 @@ class Server:
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
                     "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross"
                 }
-                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 220}
+                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Rook": 200, "Queen": 300}
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
