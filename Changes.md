@@ -1,7 +1,7 @@
 
 # Bugs
 
-Can't see the chat in the lobby.
+Can't see the chat in the lobby. DONE
 Kill score does not refresh every round.
 Units stay alive when king die.
 Nerf pawns, denerf queens.

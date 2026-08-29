@@ -98,6 +98,7 @@ class ClientApp:
         self.active_field = "username"
         self.ip_input = "127.0.0.1"
         self.player_id = None
+        self.particles = []
         self.chat_active = False
         self.scores = {}
         self.kills = {}
@@ -156,6 +157,16 @@ class ClientApp:
         while True:
             dt = clock.tick(60) / 1000.0
             self.anim_tick += 1
+
+            # Process particle physics
+            alive_particles = []
+            for p in self.particles:
+                p["x"] += p["vx"] * dt
+                p["y"] += p["vy"] * dt
+                p["life"] -= dt
+                if p["life"] > 0:
+                    alive_particles.append(p)
+            self.particles = alive_particles
 
             if self.state == "CONNECTED" and self.game_state in ("SHOP", "IN_GAME"):
                 keys = pygame.key.get_pressed()
@@ -315,8 +326,24 @@ class ClientApp:
             else:
                 play_pitched_melee(utype)
         elif mtype == "GAME_UPDATE":
+            old_units = {u["id"]: u for u in self.units}
             old_positions = {u["id"]: (u["x"], u["y"]) for u in self.units}
             self.units = msg["units"]
+
+            # Deduce deaths and spawn particles
+            new_unit_ids = {u["id"] for u in self.units}
+            for uid, old_u in old_units.items():
+                if uid not in new_unit_ids:
+                    for _ in range(15):
+                        angle = random.uniform(0, math.pi * 2)
+                        speed = random.uniform(20, 80)
+                        self.particles.append({
+                            "x": old_u["x"], "y": old_u["y"],
+                            "vx": math.cos(angle) * speed,
+                            "vy": math.sin(angle) * speed,
+                            "life": 0.5, "max_life": 0.5,
+                            "color": self.get_player_color(old_u["owner"])
+                        })
             self.projectiles = msg.get("projectiles", [])
             self.water_level = msg.get("water_level", self.water_level)
             if "kills" in msg:
@@ -623,6 +650,12 @@ class ClientApp:
     def draw_units_and_projectiles(self):
         board_rect = pygame.Rect(260, 40, 500, 500)
         SCREEN.set_clip(board_rect)
+
+        # Draw death particles
+        for p in self.particles:
+            sx, sy = self.to_screen_coords(p["x"], p["y"])
+            radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
+            pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
         for p in self.projectiles:
             sx, sy = self.to_screen_coords(p["x"], p["y"])
