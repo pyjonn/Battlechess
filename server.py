@@ -762,48 +762,43 @@ class Server:
 
                 # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
                 # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
+                # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
 
-                        # Disengage target if it walked beyond max leash distance from guard anchor
                         if target:
                             guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            # Reduced leash thresholds so units don't pursue too far
-                            max_leash = 180.0 if u["type"] == "Knight" else 90.0
+                            # Halved max leash distances (Knight: 90.0, Others: 45.0)
+                            max_leash = 90.0 if u["type"] == "Knight" else 45.0
                             if guard_dist > max_leash:
                                 target = None
                                 u["target_unit"] = None
 
-                    # Automatically acquire nearest enemy in path/range if no current explicit target
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        # Lower scan ranges mean units won't agro onto far-off targets
-                        scan_range = 180.0 if u["type"] == "Knight" else 80.0
-                        leash_range = 200.0 if u["type"] == "Knight" else 90.0
+                        # Halved scan and leash ranges (Knight scan: 90.0, Others: 40.0)
+                        scan_range = 90.0 if u["type"] == "Knight" else 40.0
+                        leash_range = 100.0 if u["type"] == "Knight" else 45.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
                             target = closest_enemy
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            # Return to guard position if no enemies are within immediate range
-                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=40.0)
+                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=20.0)
                             if not any_enemy_near:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                # --- ARCHER (KNIGHT) RANGE & AUTO-STOP BEHAVIOR ---
-                # --- ARCHER (KNIGHT) RANGE & AUTO-STOP BEHAVIOR ---
+                    # --- ARCHER (KNIGHT) RANGE & AUTO-STOP BEHAVIOR ---
                     if u["type"] == "Knight" and target:
-                        archer_range = 350.0  # Consistent range check
+                        archer_range = 175.0  # Halved from 350.0 to 175.0
                         e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
 
-                        # Pivot face towards target immediately even if standing still
                         desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                         u["angle"] = lerp_angle(u["angle"], desired_angle, 0.25)
 
-                        # If target is within range, stop moving and hold guard position
                         if e_dist <= archer_range:
                             u["waypoints"] = []
                             u["target_x"] = u["x"]
@@ -811,7 +806,7 @@ class Server:
                             u["is_moving"] = False
 
                     if target and u.get("target_unit"):
-                        archer_range = 350.0 if u["type"] == "Knight" else 0.0
+                        archer_range = 175.0 if u["type"] == "Knight" else 0.0 # Halved from 350.0 to 175.0
                         e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                         if u["type"] != "Knight" or e_dist > archer_range:
                             u["target_x"] = target["x"]
@@ -826,6 +821,7 @@ class Server:
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
                     # Look ahead 1.5 tile lengths for a smoother slope gradient preview
+                    # Look ahead 1.5 tile lengths for a smoother slope gradient preview
                     lookahead_dist = tile_pixel_size * 1.5
                     ahead_x = u["x"] + (dx / dist) * lookahead_dist
                     ahead_y = u["y"] + (dy / dist) * lookahead_dist
@@ -834,12 +830,12 @@ class Server:
                     # Calculate height slope smooth differential
                     height_diff = ahead_h - current_h
 
-                    # Continuous exponential slope modifier (prevents sudden speed snaps)
+                    # Continuous exponential slope modifier
                     if height_diff > 0:
-                        # Moving UPHILL: smooth speed reduction capped at 40% base speed
-                        slope_factor = max(0.4, 1.0 / (1.0 + (height_diff * 0.8)))
+                        # Increased penalty divisor from 0.8 to 2.5 and lowered minimum cap from 0.4 to 0.15
+                        slope_factor = max(0.15, 1.0 / (1.0 + (height_diff * 2.5)))
                     else:
-                        # Moving DOWNHILL: smooth speed boost capped at 140% base speed
+                        # Moving DOWNHILL
                         slope_factor = min(1.4, 1.0 + (abs(height_diff) * 0.4))
 
                     speed *= slope_factor
