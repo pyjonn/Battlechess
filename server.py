@@ -68,7 +68,6 @@ def sample_smooth_noise(grid, x, y):
     return top + sy * (bottom - top)
 
 def find_nearest_enemy_in_path(unit, enemies, scan_radius=80.0, max_leash=90.0):
-    """Finds the closest enemy within scan radius, provided they aren't beyond the leash distance from guard post."""
     closest_enemy = None
     min_dist = scan_radius
 
@@ -83,7 +82,6 @@ def find_nearest_enemy_in_path(unit, enemies, scan_radius=80.0, max_leash=90.0):
         dy = enemy["y"] - unit["y"]
         dist = math.hypot(dx, dy)
 
-        # Check distance from the unit's guard position to prevent over-chasing
         dist_from_guard = math.hypot(enemy["x"] - guard_x, enemy["y"] - guard_y)
 
         if dist < min_dist and dist_from_guard <= max_leash:
@@ -93,7 +91,6 @@ def find_nearest_enemy_in_path(unit, enemies, scan_radius=80.0, max_leash=90.0):
     return closest_enemy
 
 def find_nearest_hurt_ally(unit, allies, scan_radius=250.0, max_leash=200.0):
-    """Finds the closest damaged friendly unit within scan radius and leash limit."""
     closest_ally = None
     min_dist = scan_radius
 
@@ -117,7 +114,7 @@ def find_nearest_hurt_ally(unit, allies, scan_radius=250.0, max_leash=200.0):
     return closest_ally
 
 def generate_heightmap(size, water_enabled, units=None, water_rising=False):
-    logging.debug(f"Generating randomized heightmap for size {size}")
+    logging.debug(f"Generating heightmap for size {size}")
     grid = [[0.0 for _ in range(size)] for _ in range(size)]
 
     octave1 = generate_noise_grid(4, 4)
@@ -127,6 +124,8 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
     cx, cy = size / 2.0, size / 2.0
     tile_pixel_size = 800.0 / size
 
+    base_bias = random.uniform(-0.6, 0.4)
+
     for r in range(size):
         for c in range(size):
             nx, ny = c / float(size), r / float(size)
@@ -134,7 +133,7 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
             val2 = sample_smooth_noise(octave2, nx * 8, ny * 8) * 0.5
             val3 = sample_smooth_noise(octave3, nx * 16, ny * 16) * 0.25
 
-            elevation = val1 + val2 + val3
+            elevation = val1 + val2 + val3 + base_bias
 
             if water_enabled:
                 dist_center = math.hypot(c - cx, r - cy) / (size * 0.5)
@@ -158,7 +157,7 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
     if units is not None:
         protected_positions = [(u["x"], u["y"]) for u in units if u["type"] == "King"]
     else:
-        protected_positions = [(400, 120), (400, 680), (120, 400), (680, 400)]
+        protected_positions = [(400, 680), (400, 120), (120, 400), (680, 400)]
 
     for wx, wy in protected_positions:
         center_c = int(wx / tile_pixel_size)
@@ -171,7 +170,7 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
                 dist = math.hypot(c - center_c, r - center_r)
                 if dist <= island_radius:
                     blend = dist / island_radius
-                    smooth = blend * blend * (3 - 2 * blend)
+                    smooth = blend * blend * (3 - 2 * smooth if 'smooth' in locals() else 3 - 2 * blend)
                     original_h = grid[r][c]
                     if original_h < target_land_height:
                         boosted_h = (target_land_height * (1.0 - smooth)) + (original_h * smooth)
@@ -183,7 +182,6 @@ def get_height_at_pos(wx, wy, heightmap, board_size):
         return 0.0
     tile_size = 800.0 / board_size
 
-    # Continuous tile grid coordinates
     gx = max(0.0, min(board_size - 1.001, wx / tile_size))
     gy = max(0.0, min(board_size - 1.001, wy / tile_size))
 
@@ -192,7 +190,6 @@ def get_height_at_pos(wx, wy, heightmap, board_size):
 
     fx, fy = gx - x0, gy - y0
 
-    # Smooth step interpolation curve
     fx = fx * fx * (3.0 - 2.0 * fx)
     fy = fy * fy * (3.0 - 2.0 * fy)
 
@@ -204,6 +201,12 @@ def get_height_at_pos(wx, wy, heightmap, board_size):
     top = h00 + fx * (h10 - h00)
     bottom = h01 + fx * (h11 - h01)
     return top + fy * (bottom - top)
+
+def get_height_modifier(current_pos, next_pos, heightmap, board_size):
+
+    h_curr = get_height_at_pos(current_pos[0], current_pos[1], heightmap, board_size)
+    h_next = get_height_at_pos(next_pos[0], next_pos[1], heightmap, board_size)
+    return h_next - h_curr
 
 def has_cone_vision(viewer, target_x, target_y):
     max_range = 200.0
@@ -455,8 +458,8 @@ class Server:
             tile_pixel_size = 800.0 / self.board_size
             four_block_radius = int(2.0 * tile_pixel_size) / 2
             king_positions = {
-                0: (400, 120, math.pi/2),
-                1: (400, 680, 3*math.pi/2),
+                0: (400, 680, 3*math.pi/2),
+                1: (400, 120, math.pi/2),
                 2: (120, 400, 0.0),
                 3: (680, 400, math.pi)
             }
@@ -532,8 +535,8 @@ class Server:
                     return
 
                 valid_side = True
-                if pid == 0 and spawn_y > 400: valid_side = False
-                elif pid == 1 and spawn_y < 400: valid_side = False
+                if pid == 0 and spawn_y < 400: valid_side = False
+                elif pid == 1 and spawn_y > 400: valid_side = False
                 elif pid == 2 and spawn_x > 400: valid_side = False
                 elif pid == 3 and spawn_x < 400: valid_side = False
 
@@ -681,7 +684,6 @@ class Server:
 
             now = time.time()
 
-            # Multi-pass collision resolution
             for _ in range(3):
                 for i in range(len(self.units)):
                     for j in range(i + 1, len(self.units)):
@@ -737,9 +739,6 @@ class Server:
                         u["target_unit"] = None
                         u["target_x"], u["target_y"] = wp_x, wp_y
 
-                # Auto-acquire targets for idle or moving units
-                # Auto-acquire targets for idle or moving units
-                # --- HEALER TARGETING ---
                 if u["type"] == "Healer":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
@@ -753,47 +752,40 @@ class Server:
                         if target:
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            # Only return to guard position if NO enemies are nearby
                             enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                             nearby_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=500.0, max_leash=9999.0)
                             if not nearby_enemy:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
-                # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
-                # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
 
                         if target:
                             guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            # Halved max leash distances (Knight: 90.0, Others: 45.0)
-                            max_leash = 90.0 if u["type"] == "Knight" else 45.0
+                            max_leash = 150.0 if u["type"] == "Knight" else 120.0
                             if guard_dist > max_leash:
                                 target = None
                                 u["target_unit"] = None
 
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        # Halved scan and leash ranges (Knight scan: 90.0, Others: 40.0)
-                        scan_range = 90.0 if u["type"] == "Knight" else 40.0
-                        leash_range = 100.0 if u["type"] == "Knight" else 45.0
+                        scan_range = 140.0 if u["type"] == "Knight" else 100.0
+                        leash_range = 150.0 if u["type"] == "Knight" else 120.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
                             target = closest_enemy
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=20.0)
+                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=50.0)
                             if not any_enemy_near:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                    # --- ARCHER (KNIGHT) RANGE & AUTO-STOP BEHAVIOR ---
                     if u["type"] == "Knight" and target:
-                        archer_range = 175.0  # Halved from 350.0 to 175.0
+                        archer_range = 175.0
                         e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
 
                         desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
@@ -806,11 +798,12 @@ class Server:
                             u["is_moving"] = False
 
                     if target and u.get("target_unit"):
-                        archer_range = 175.0 if u["type"] == "Knight" else 0.0 # Halved from 350.0 to 175.0
+                        archer_range = 175.0 if u["type"] == "Knight" else 0.0
                         e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                         if u["type"] != "Knight" or e_dist > archer_range:
                             u["target_x"] = target["x"]
                             u["target_y"] = target["y"]
+
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
@@ -820,35 +813,27 @@ class Server:
                     base_blocks_per_second = u.get("group_speed") if u.get("group_speed") is not None else get_unit_base_speed(u["type"])
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
-                    # Look ahead 1.5 tile lengths for a smoother slope gradient preview
-                    # Look ahead 1.5 tile lengths for a smoother slope gradient preview
-                    lookahead_dist = tile_pixel_size * 1.5
-                    ahead_x = u["x"] + (dx / dist) * lookahead_dist
-                    ahead_y = u["y"] + (dy / dist) * lookahead_dist
-                    ahead_h = get_height_at_pos(ahead_x, ahead_y, self.heightmap, self.board_size)
+                    step_x_dir = dx / dist
+                    step_y_dir = dy / dist
+                    look_ahead_x = u["x"] + step_x_dir * 10.0
+                    look_ahead_y = u["y"] + step_y_dir * 10.0
 
-                    # Calculate height slope smooth differential
-                    height_diff = ahead_h - current_h
+                    height_diff = get_height_modifier((u["x"], u["y"]), (look_ahead_x, look_ahead_y), self.heightmap, self.board_size)
 
-                    # Continuous exponential slope modifier
-                    if height_diff > 0:
-                        # Increased penalty divisor from 0.8 to 2.5 and lowered minimum cap from 0.4 to 0.15
-                        slope_factor = max(0.15, 1.0 / (1.0 + (height_diff * 2.5)))
-                    else:
-                        # Moving DOWNHILL
-                        slope_factor = min(1.4, 1.0 + (abs(height_diff) * 0.4))
-
-                    speed *= slope_factor
+                    speed_multiplier = max(0.4, min(1.8, 1.0 - (height_diff * 0.5)))
+                    speed *= speed_multiplier
 
                     if water_depth > 0:
                         speed *= max(0.15, 1.0 - (water_depth * 0.75))
 
-                    step_x = (dx / dist) * speed
-                    step_y = (dy / dist) * speed
-                    u["x"] += step_x
-                    u["y"] += step_y
-                    u["vx"] = step_x
-                    u["vy"] = step_y
+                    target_vx = step_x_dir * speed
+                    target_vy = step_y_dir * speed
+
+                    u["vx"] = u.get("vx", 0.0) * 0.7 + target_vx * 0.3
+                    u["vy"] = u.get("vy", 0.0) * 0.7 + target_vy * 0.3
+
+                    u["x"] += u["vx"]
+                    u["y"] += u["vy"]
 
                     if not target or not has_cone_vision(u, target["x"], target["y"]):
                         desired_angle = math.atan2(dy, dx)
@@ -877,22 +862,6 @@ class Server:
                     e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                     can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
 
-                    attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
-                    target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
-
-                    # Calculate signed elevation difference (Attacker elevation minus Target elevation)
-                    slope_diff = attacker_h - target_h
-
-                    if slope_diff > 0.05:
-                        # Attacking DOWN hill (Attacker higher than Target): deal MORE damage
-                        height_damage_modifier = int(slope_diff * 25.0)
-                    elif slope_diff < -0.05:
-                        # Attacking UP hill (Attacker lower than Target): deal LESS damage (hurt less)
-                        height_damage_modifier = -int(abs(slope_diff) * 15.0)
-                    else:
-                        height_damage_modifier = 0
-
-                    bonus_dmg = height_damage_modifier
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Knight":
@@ -903,9 +872,15 @@ class Server:
                             u["last_attack"] = now
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                             u["angle"] = base_ang
+
+                            target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
+                            attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                            h_diff = target_h - attacker_h
+                            dmg_mult = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
+
                             self.projectiles.append({
                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
-                                "owner": u["owner"], "damage": max(1, 25 + bonus_dmg), "life": projectile_life
+                                "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life
                             })
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
                     elif u["type"] == "Healer":
@@ -922,9 +897,15 @@ class Server:
 
                         if e_dist < attack_range and can_see and in_front and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
-                            # Apply damage floor of at least 1 HP
-                            actual_damage = max(1, damage_val + bonus_dmg)
-                            target["hp"] -= actual_damage
+
+                            target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
+                            attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                            h_diff = target_h - attacker_h
+
+                            damage_multiplier = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
+                            final_damage = damage_val * damage_multiplier
+                            target["hp"] -= final_damage
+
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
 

@@ -138,10 +138,10 @@ class ClientApp:
     def get_player_color(self, owner):
         if self.game_mode == "2v2":
             team_colors = {
-                0: (60, 120, 240),   # Team 0 - Player 1
-                2: (130, 190, 255),  # Team 0 - Player 3
-                1: (220, 60, 60),    # Team 1 - Player 2
-                3: (255, 140, 120)   # Team 1 - Player 4
+                0: (60, 120, 240),
+                2: (130, 190, 255),
+                1: (220, 60, 60),
+                3: (255, 140, 120)
             }
             return team_colors.get(owner, (255, 255, 255))
         else:
@@ -342,6 +342,13 @@ class ClientApp:
         elif mtype == "GAME_UPDATE":
             old_units = {u["id"]: u for u in self.units}
             old_positions = {u["id"]: (u["x"], u["y"]) for u in self.units}
+
+            for u in msg["units"]:
+                if u["id"] in old_positions:
+                    ox, oy = old_positions[u["id"]]
+                    u["x"] = ox * 0.4 + u["x"] * 0.6
+                    u["y"] = oy * 0.4 + u["y"] * 0.6
+
             self.units = msg["units"]
 
             new_unit_ids = {u["id"] for u in self.units}
@@ -500,8 +507,8 @@ class ClientApp:
                     wmx, wmy = self.to_world_coords(mx, my)
 
                     valid_side = True
-                    if self.player_id == 0 and wmy > 400: valid_side = False
-                    elif self.player_id == 1 and wmy < 400: valid_side = False
+                    if self.player_id == 0 and wmy < 400: valid_side = False
+                    elif self.player_id == 1 and wmy > 400: valid_side = False
                     elif self.player_id == 2 and wmx > 400: valid_side = False
                     elif self.player_id == 3 and wmx < 400: valid_side = False
 
@@ -537,7 +544,7 @@ class ClientApp:
                 if smx > 250 and smy > 40:
                     self.drag_start = (smx, smy)
 
-            elif event.button == 3:  # Right Click Command
+            elif event.button == 3:
                 if smx > 250 and smy > 40 and self.selected_units:
                     wmx, wmy = self.to_world_coords(smx, smy)
                     is_shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
@@ -558,7 +565,7 @@ class ClientApp:
                         "append_path": is_shift
                     })
 
-            elif event.button == 2:  # Middle Click Pan
+            elif event.button == 2:
                 if smx > 250 and smy > 40:
                     self.right_dragging = True
                     self.pan_start_pos = (smx, smy)
@@ -574,7 +581,6 @@ class ClientApp:
                     if smx > 250 and smy > 40 and start_x > 250 and start_y > 40:
                         is_shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
 
-                        # Small drag distance is treated as a single click
                         if abs(smx - start_x) < 5 and abs(smy - start_y) < 5:
                             wmx, wmy = self.to_world_coords(smx, smy)
                             if not is_shift:
@@ -586,7 +592,6 @@ class ClientApp:
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
                         else:
-                            # Drag box selection
                             if not is_shift:
                                 self.selected_units.clear()
                             min_x, max_x = min(start_x, smx), max(start_x, smx)
@@ -599,7 +604,7 @@ class ClientApp:
                                     if select_rect.collidepoint(usx, usy):
                                         self.selected_units.add(u["id"])
 
-            elif event.button == 2:  # Middle Click Release
+            elif event.button == 2:
                 self.right_dragging = False
 
         elif event.type == pygame.MOUSEMOTION:
@@ -625,59 +630,59 @@ class ClientApp:
             self.zoom_at(pygame.mouse.get_pos(), target_zoom)
 
     def zoom_at(self, mouse_pos, new_zoom):
-        wx_before, wy_before = self.to_world_coords(mouse_pos[0], mouse_pos[1])
-        self.zoom = new_zoom
-        board_render_size = 500.0
-        scale = self.zoom * (board_render_size / WORLD_SIZE)
+            wx_before, wy_before = self.to_world_coords(mouse_pos[0], mouse_pos[1])
+            self.zoom = new_zoom
+            board_render_size = 500.0
+            scale = self.zoom * (board_render_size / WORLD_SIZE)
 
-        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
-        if self.player_id == 0:   rwx, rwy = cx - (wx_before - cx), cy - (wy_before - cy)
-        elif self.player_id == 2: rwx, rwy = cx + (wy_before - cy), cy - (wx_before - cx)
-        elif self.player_id == 3: rwx, rwy = cx - (wy_before - cy), cy + (wx_before - cx)
-        else:                     rwx, rwy = wx_before, wy_before
+            cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+            if self.player_id == 1:   rwx, rwy = cx - (wx_before - cx), cy - (wy_before - cy)
+            elif self.player_id == 2: rwx, rwy = cx + (wy_before - cy), cy - (wx_before - cx)
+            elif self.player_id == 3: rwx, rwy = cx - (wy_before - cy), cy + (wx_before - cx)
+            else:                     rwx, rwy = wx_before, wy_before
 
-        local_sx = mouse_pos[0] - 260
-        local_sy = mouse_pos[1] - 40
-        self.camera_x = rwx - (local_sx / scale)
-        self.camera_y = rwy - (local_sy / scale)
+            local_sx = mouse_pos[0] - 260
+            local_sy = mouse_pos[1] - 40
+            self.camera_x = rwx - (local_sx / scale)
+            self.camera_y = rwy - (local_sy / scale)
 
-        max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
-        self.camera_x = max(0.0, min(max_cam, self.camera_x))
-        self.camera_y = max(0.0, min(max_cam, self.camera_y))
+            max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
+            self.camera_x = max(0.0, min(max_cam, self.camera_x))
+            self.camera_y = max(0.0, min(max_cam, self.camera_y))
 
     def to_screen_coords(self, wx, wy):
-        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
-        if self.player_id == 0:   rwx, rwy = cx - (wx - cx), cy - (wy - cy)
-        elif self.player_id == 2: rwx, rwy = cx + (wy - cy), cy - (wx - cx)
-        elif self.player_id == 3: rwx, rwy = cx - (wy - cy), cy + (wx - cx)
-        else:                     rwx, rwy = wx, wy
+            cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+            if self.player_id == 1:   rwx, rwy = cx - (wx - cx), cy - (wy - cy)
+            elif self.player_id == 2: rwx, rwy = cx + (wy - cy), cy - (wx - cx)
+            elif self.player_id == 3: rwx, rwy = cx - (wy - cy), cy + (wx - cx)
+            else:                     rwx, rwy = wx, wy
 
-        board_render_size = 500.0
-        scale = self.zoom * (board_render_size / WORLD_SIZE)
-        local_x = (rwx - self.camera_x) * scale
-        local_y = (rwy - self.camera_y) * scale
+            board_render_size = 500.0
+            scale = self.zoom * (board_render_size / WORLD_SIZE)
+            local_x = (rwx - self.camera_x) * scale
+            local_y = (rwy - self.camera_y) * scale
 
-        return 260 + local_x, 40 + local_y
+            return 260 + local_x, 40 + local_y
 
     def to_world_coords(self, sx, sy):
-        board_render_size = 500.0
-        scale = self.zoom * (board_render_size / WORLD_SIZE)
-        rwx = ((sx - 260) / scale) + self.camera_x
-        rwy = ((sy - 40) / scale) + self.camera_y
+            board_render_size = 500.0
+            scale = self.zoom * (board_render_size / WORLD_SIZE)
+            rwx = ((sx - 260) / scale) + self.camera_x
+            rwy = ((sy - 40) / scale) + self.camera_y
 
-        cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
-        if self.player_id == 0:   wx, wy = cx - (rwx - cx), cy - (rwy - cy)
-        elif self.player_id == 2: wx, wy = cx - (rwy - cy), cy + (rwx - cx)
-        elif self.player_id == 3: wx, wy = cx + (rwy - cy), cy - (rwx - cx)
-        else:                     wx, wy = rwx, rwy
-        return wx, wy
+            cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+            if self.player_id == 1:   wx, wy = cx - (rwx - cx), cy - (rwy - cy)
+            elif self.player_id == 2: wx, wy = cx - (rwy - cy), cy + (rwx - cx)
+            elif self.player_id == 3: wx, wy = cx + (rwy - cy), cy - (rwx - cx)
+            else:                     wx, wy = rwx, rwy
+            return wx, wy
 
     def to_screen_angle(self, angle):
-        if self.player_id == 0:   rot = math.pi
-        elif self.player_id == 2: rot = -math.pi / 2
-        elif self.player_id == 3: rot = math.pi / 2
-        else:                     rot = 0.0
-        return angle + rot
+            if self.player_id == 1:   rot = math.pi
+            elif self.player_id == 2: rot = -math.pi / 2
+            elif self.player_id == 3: rot = math.pi / 2
+            else:                     rot = 0.0
+            return angle + rot
 
     def draw_board(self):
         board_rect = pygame.Rect(260, 40, 500, 500)
@@ -691,24 +696,19 @@ class ClientApp:
             for c in range(self.board_size):
                 if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
                     h = self.heightmap[r][c]
+
                     if h <= self.water_level:
                         color = (40, 120, 220)
                     else:
-                        # Normalize height across a broader elevation range
                         norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
-
                         if norm_h < 0.35:
-                            # Grasslands
                             color = (int(25 + norm_h * 100), int(105 + norm_h * 120), int(30 + norm_h * 40))
                         elif norm_h < 0.70:
-                            # Mountain rock gradient (shows height depth)
                             stone_val = int(80 + (norm_h - 0.35) * 220)
                             color = (stone_val, stone_val, min(255, stone_val + 15))
                         else:
-                            # High peaks & Snow cap with contour shading
                             snow_val = int(180 + (norm_h - 0.70) * 230)
-                            snow_val = min(245, snow_val) # Cap brightness to preserve details
-                            color = (snow_val - 15, snow_val - 5, snow_val)
+                            color = (min(245, snow_val), min(245, snow_val), min(245, snow_val))
                 else:
                     color = (105, 185, 85)
 
@@ -717,8 +717,8 @@ class ClientApp:
 
                 if self.game_state == "SHOP":
                     is_my_side = True
-                    if self.player_id == 0 and wy > 400: is_my_side = False
-                    elif self.player_id == 1 and wy < 400: is_my_side = False
+                    if self.player_id == 0 and wy < 400: is_my_side = False
+                    elif self.player_id == 1 and wy > 400: is_my_side = False
                     elif self.player_id == 2 and wx > 400: is_my_side = False
                     elif self.player_id == 3 and wx < 400: is_my_side = False
 
@@ -742,18 +742,15 @@ class ClientApp:
         board_rect = pygame.Rect(260, 40, 500, 500)
         SCREEN.set_clip(board_rect)
 
-        # Draw destination and path lines for moving units
         for u in self.units:
             if u["owner"] == self.player_id and u.get("is_moving", False):
                 start_sx, start_sy = self.to_screen_coords(u["x"], u["y"])
                 path_points = [(start_sx, start_sy)]
 
-                # Add immediate target coordinate
                 if "target_x" in u and "target_y" in u:
                     tsx, tsy = self.to_screen_coords(u["target_x"], u["target_y"])
                     path_points.append((tsx, tsy))
 
-                # Add any remaining queued waypoints
                 waypoints = u.get("waypoints", [])
                 for wp in waypoints[1:]:
                     wsx, wsy = self.to_screen_coords(wp[0], wp[1])
@@ -764,7 +761,6 @@ class ClientApp:
                     line_color = (0, 255, 120) if is_selected else (140, 180, 140)
                     line_width = 2 if is_selected else 1
 
-                    # Draw path line connecting unit to target points
                     pygame.draw.lines(
                         SCREEN,
                         line_color,
@@ -773,7 +769,6 @@ class ClientApp:
                         line_width
                     )
 
-                    # Draw destination marker at the end of the path
                     end_x, end_y = path_points[-1]
                     pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
 
