@@ -694,23 +694,21 @@ class ClientApp:
                     if h <= self.water_level:
                         color = (40, 120, 220)
                     else:
-                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (1.5 - self.water_level)))
+                        # Normalize height across a broader elevation range
+                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
 
-                        red_grass = int(25 + norm_h * 75)
-                        green_grass = int(105 + norm_h * 135)
-                        blue_grass = int(30 + norm_h * 45)
-
-                        stone_val = max(110, min(200, int(110 + norm_h * 90)))
-                        mountain_color = (stone_val, stone_val, stone_val + 10)
-
-                        blend = max(0.0, min(1.0, (h - 0.45) / 0.30))
-                        smooth_blend = blend * blend * (3 - 2 * blend)
-
-                        r_col = int(red_grass * (1 - smooth_blend) + mountain_color[0] * smooth_blend)
-                        g_col = int(min(255, green_grass) * (1 - smooth_blend) + mountain_color[1] * smooth_blend)
-                        b_col = int(blue_grass * (1 - smooth_blend) + mountain_color[2] * smooth_blend)
-
-                        color = (r_col, g_col, b_col)
+                        if norm_h < 0.35:
+                            # Grasslands
+                            color = (int(25 + norm_h * 100), int(105 + norm_h * 120), int(30 + norm_h * 40))
+                        elif norm_h < 0.70:
+                            # Mountain rock gradient (shows height depth)
+                            stone_val = int(80 + (norm_h - 0.35) * 220)
+                            color = (stone_val, stone_val, min(255, stone_val + 15))
+                        else:
+                            # High peaks & Snow cap with contour shading
+                            snow_val = int(180 + (norm_h - 0.70) * 230)
+                            snow_val = min(245, snow_val) # Cap brightness to preserve details
+                            color = (snow_val - 15, snow_val - 5, snow_val)
                 else:
                     color = (105, 185, 85)
 

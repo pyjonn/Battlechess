@@ -182,9 +182,28 @@ def get_height_at_pos(wx, wy, heightmap, board_size):
     if not heightmap:
         return 0.0
     tile_size = 800.0 / board_size
-    c = max(0, min(board_size - 1, int(wx / tile_size)))
-    r = max(0, min(board_size - 1, int(wy / tile_size)))
-    return heightmap[r][c]
+
+    # Continuous tile grid coordinates
+    gx = max(0.0, min(board_size - 1.001, wx / tile_size))
+    gy = max(0.0, min(board_size - 1.001, wy / tile_size))
+
+    x0, y0 = int(gx), int(gy)
+    x1, y1 = min(board_size - 1, x0 + 1), min(board_size - 1, y0 + 1)
+
+    fx, fy = gx - x0, gy - y0
+
+    # Smooth step interpolation curve
+    fx = fx * fx * (3.0 - 2.0 * fx)
+    fy = fy * fy * (3.0 - 2.0 * fy)
+
+    h00 = heightmap[y0][x0]
+    h10 = heightmap[y0][x1]
+    h01 = heightmap[y1][x0]
+    h11 = heightmap[y1][x1]
+
+    top = h00 + fx * (h10 - h00)
+    bottom = h01 + fx * (h11 - h01)
+    return top + fy * (bottom - top)
 
 def has_cone_vision(viewer, target_x, target_y):
     max_range = 200.0
@@ -806,15 +825,24 @@ class Server:
                     base_blocks_per_second = u.get("group_speed") if u.get("group_speed") is not None else get_unit_base_speed(u["type"])
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
 
-                    ahead_x = u["x"] + (dx / dist) * 10.0
-                    ahead_y = u["y"] + (dy / dist) * 10.0
+                    # Look ahead 1.5 tile lengths for a smoother slope gradient preview
+                    lookahead_dist = tile_pixel_size * 1.5
+                    ahead_x = u["x"] + (dx / dist) * lookahead_dist
+                    ahead_y = u["y"] + (dy / dist) * lookahead_dist
                     ahead_h = get_height_at_pos(ahead_x, ahead_y, self.heightmap, self.board_size)
 
+                    # Calculate height slope smooth differential
                     height_diff = ahead_h - current_h
-                    if height_diff > 0.05:
-                        speed *= max(0.4, 1.0 - (height_diff * 0.8))
-                    elif height_diff < -0.05:
-                        speed *= min(1.6, 1.0 + (abs(height_diff) * 0.6))
+
+                    # Continuous exponential slope modifier (prevents sudden speed snaps)
+                    if height_diff > 0:
+                        # Moving UPHILL: smooth speed reduction capped at 40% base speed
+                        slope_factor = max(0.4, 1.0 / (1.0 + (height_diff * 0.8)))
+                    else:
+                        # Moving DOWNHILL: smooth speed boost capped at 140% base speed
+                        slope_factor = min(1.4, 1.0 + (abs(height_diff) * 0.4))
+
+                    speed *= slope_factor
 
                     if water_depth > 0:
                         speed *= max(0.15, 1.0 - (water_depth * 0.75))
@@ -855,7 +883,20 @@ class Server:
 
                     attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
                     target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
-                    bonus_dmg = int(max(0, attacker_h - target_h) * 15)
+
+                    # Calculate signed elevation difference (Attacker elevation minus Target elevation)
+                    slope_diff = attacker_h - target_h
+
+                    if slope_diff > 0.05:
+                        # Attacking DOWN hill (Attacker higher than Target): deal MORE damage
+                        height_damage_modifier = int(slope_diff * 25.0)
+                    elif slope_diff < -0.05:
+                        # Attacking UP hill (Attacker lower than Target): deal LESS damage (hurt less)
+                        height_damage_modifier = -int(abs(slope_diff) * 15.0)
+                    else:
+                        height_damage_modifier = 0
+
+                    bonus_dmg = height_damage_modifier
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Knight":
@@ -868,7 +909,7 @@ class Server:
                             u["angle"] = base_ang
                             self.projectiles.append({
                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
-                                "owner": u["owner"], "damage": 25 + bonus_dmg, "life": projectile_life
+                                "owner": u["owner"], "damage": max(1, 25 + bonus_dmg), "life": projectile_life
                             })
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
                     elif u["type"] == "Healer":
@@ -885,7 +926,9 @@ class Server:
 
                         if e_dist < attack_range and can_see and in_front and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
-                            target["hp"] -= (damage_val + bonus_dmg)
+                            # Apply damage floor of at least 1 HP
+                            actual_damage = max(1, damage_val + bonus_dmg)
+                            target["hp"] -= actual_damage
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": u["type"]})
 
