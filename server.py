@@ -67,7 +67,7 @@ def sample_smooth_noise(grid, x, y):
     bottom = v01 + sx * (v11 - v01)
     return top + sy * (bottom - top)
 
-def find_nearest_enemy_in_path(unit, enemies, scan_radius=150.0, max_leash=180.0):
+def find_nearest_enemy_in_path(unit, enemies, scan_radius=80.0, max_leash=90.0):
     """Finds the closest enemy within scan radius, provided they aren't beyond the leash distance from guard post."""
     closest_enemy = None
     min_dist = scan_radius
@@ -742,6 +742,7 @@ class Server:
                                 u["target_y"] = u.get("guard_y", u["y"])
 
                 # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
+                # --- ATTACKER/OFFENSIVE UNIT TARGETING ---
                 elif u["type"] != "Block":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
@@ -749,7 +750,8 @@ class Server:
                         # Disengage target if it walked beyond max leash distance from guard anchor
                         if target:
                             guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            max_leash = 350.0 if u["type"] == "Knight" else 180.0
+                            # Reduced leash thresholds so units don't pursue too far
+                            max_leash = 180.0 if u["type"] == "Knight" else 90.0
                             if guard_dist > max_leash:
                                 target = None
                                 u["target_unit"] = None
@@ -757,16 +759,17 @@ class Server:
                     # Automatically acquire nearest enemy in path/range if no current explicit target
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = 350.0 if u["type"] == "Knight" else 180.0
-                        leash_range = 400.0 if u["type"] == "Knight" else 180.0
+                        # Lower scan ranges mean units won't agro onto far-off targets
+                        scan_range = 180.0 if u["type"] == "Knight" else 80.0
+                        leash_range = 200.0 if u["type"] == "Knight" else 90.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
                             target = closest_enemy
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            # Check if ANY enemy exists within detection range before returning to guard post
-                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=9999.0)
+                            # Return to guard position if no enemies are within immediate range
+                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=40.0)
                             if not any_enemy_near:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
