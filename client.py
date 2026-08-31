@@ -697,61 +697,68 @@ class ClientApp:
             return angle + rot
 
     def draw_board(self):
-        board_rect = pygame.Rect(260, 40, 500, 500)
-        SCREEN.set_clip(board_rect)
+                board_rect = pygame.Rect(260, 40, 500, 500)
+                SCREEN.set_clip(board_rect)
 
-        ts_world = WORLD_SIZE / float(self.board_size)
-        ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
-        rect_size = math.ceil(ts_screen) + 1
+                ts_world = WORLD_SIZE / float(self.board_size)
+                ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
+                rect_size = math.ceil(ts_screen) + 1
 
-        for r in range(self.board_size):
-            for c in range(self.board_size):
-                wx = c * ts_world + ts_world / 2.0
-                wy = r * ts_world + ts_world / 2.0
+                # High-contrast color definitions
+                COLOR_WHITE = (255, 255, 255) # Top height terrain
+                COLOR_GREY  = (100, 105, 120) # Mid height terrain (Darker gray for contrast)
+                # Terrain color definitions for dark-to-light green gradient
+                COLOR_DARK_GREEN  = (0, 100, 0)   # Lower terrain
+                COLOR_LIGHT_GREEN = (140, 230, 80) # Higher terrain
 
-                if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
-                    h = self.heightmap[r][c]
+                for r in range(self.board_size):
+                    for c in range(self.board_size):
+                        wx = c * ts_world + ts_world / 2.0
+                        wy = r * ts_world + ts_world / 2.0
 
-                    if h <= self.water_level:
-                        color = (40, 120, 220)
-                    else:
-                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
-                        if norm_h < 0.35:
-                            color = (int(25 + norm_h * 100), int(105 + norm_h * 120), int(30 + norm_h * 40))
-                        elif norm_h < 0.70:
-                            stone_val = int(80 + (norm_h - 0.35) * 220)
-                            color = (stone_val, stone_val, min(255, stone_val + 15))
+                        if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
+                            h = self.heightmap[r][c]
+
+                            if h <= self.water_level:
+                                color = (0, 120, 245)  # Vibrant Water
+                            else:
+                                # Normalize height above water level to a 0.0 -> 1.0 scale
+                                norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
+
+                                # Linear interpolation from Dark Green (low) to Light Green (high)
+                                color = (
+                                    int(COLOR_DARK_GREEN[0] + norm_h * (COLOR_LIGHT_GREEN[0] - COLOR_DARK_GREEN[0])),
+                                    int(COLOR_DARK_GREEN[1] + norm_h * (COLOR_LIGHT_GREEN[1] - COLOR_DARK_GREEN[1])),
+                                    int(COLOR_DARK_GREEN[2] + norm_h * (COLOR_LIGHT_GREEN[2] - COLOR_DARK_GREEN[2]))
+                                )
                         else:
-                            snow_val = int(180 + (norm_h - 0.70) * 230)
-                            color = (min(245, snow_val), min(245, snow_val), min(245, snow_val))
-                else:
-                    color = (105, 185, 85)
+                            color = COLOR_DARK_GREEN
 
-                if not self.is_tile_visible(wx, wy):
-                    color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
+                        if not self.is_tile_visible(wx, wy):
+                            color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
 
-                if self.game_state == "SHOP":
-                    is_my_side = True
-                    if self.player_id == 0 and wy < 400: is_my_side = False
-                    elif self.player_id == 1 and wy > 400: is_my_side = False
-                    elif self.player_id == 2 and wx > 400: is_my_side = False
-                    elif self.player_id == 3 and wx < 400: is_my_side = False
+                        if self.game_state == "SHOP":
+                            is_my_side = True
+                            if self.player_id == 0 and wy < 400: is_my_side = False
+                            elif self.player_id == 1 and wy > 400: is_my_side = False
+                            elif self.player_id == 2 and wx > 400: is_my_side = False
+                            elif self.player_id == 3 and wx < 400: is_my_side = False
 
-                    if not is_my_side:
-                        gray = int(0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2])
-                        color = (int(gray * 0.4 + color[0] * 0.2), int(gray * 0.4 + color[1] * 0.2), int(gray * 0.4 + color[2] * 0.2))
+                            if not is_my_side:
+                                gray = int(0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2])
+                                color = (int(gray * 0.4 + color[0] * 0.2), int(gray * 0.4 + color[1] * 0.2), int(gray * 0.4 + color[2] * 0.2))
 
-                sx, sy = self.to_screen_coords(wx, wy)
+                        sx, sy = self.to_screen_coords(wx, wy)
 
-                margin = rect_size
-                if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
-                    continue
+                        margin = rect_size
+                        if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
+                            continue
 
-                rect = pygame.Rect(0, 0, rect_size, rect_size)
-                rect.center = (int(sx), int(sy))
-                pygame.draw.rect(SCREEN, color, rect)
+                        rect = pygame.Rect(0, 0, rect_size, rect_size)
+                        rect.center = (int(sx), int(sy))
+                        pygame.draw.rect(SCREEN, color, rect)
 
-        SCREEN.set_clip(None)
+                SCREEN.set_clip(None)
 
     def draw_units_and_projectiles(self):
         board_rect = pygame.Rect(260, 40, 500, 500)
