@@ -77,6 +77,7 @@ pygame.display.set_caption("Realtime-Chess Client")
 FONT = pygame.font.SysFont("Arial", 14, bold=True)
 BIG_FONT = pygame.font.SysFont("Arial", 18, bold=True)
 TITLE_FONT = pygame.font.SysFont("Arial", 22, bold=True)
+FONT_CUSTOM = pygame.font.SysFont("Arial", 12, bold=True)
 
 SHOP_ITEMS = [
     ("Pawn", 100),
@@ -551,7 +552,7 @@ class ClientApp:
                         })
 
                 for i, (name, cost) in enumerate(SHOP_ITEMS):
-                    if pygame.Rect(260 + i * 95, 550, 90, 38).collidepoint(mx, my):
+                    if pygame.Rect(260 + i * 75, 550, 70, 38).collidepoint(mx, my):
                         self.selected_shop_item = name
                         break
 
@@ -1025,14 +1026,17 @@ class ClientApp:
         SCREEN.blit(TITLE_FONT.render(f"Buy Phase - Gold: ${self.gold}", True, (255, 215, 0)), (265, 8))
 
         for i, (name, cost) in enumerate(SHOP_ITEMS):
-            rect = pygame.Rect(260 + i * 95, 550, 90, 38)
+            rect = pygame.Rect(260 + i * 75, 550, 70, 38)
             bg_color = (80, 120, 80) if getattr(self, "selected_shop_item", None) == name else (50, 50, 75)
             pygame.draw.rect(SCREEN, bg_color, rect, border_radius=4)
-            SCREEN.blit(FONT.render(f"+ {name}", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
-            SCREEN.blit(FONT.render(f"${cost}", True, (255, 215, 0)), (rect.x + 4, rect.y + 20))
+            if name == "Shieldman":
+                SCREEN.blit(FONT_CUSTOM.render(f"+ Shield", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
+            else:
+                SCREEN.blit(FONT_CUSTOM.render(f"+ {name}", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
+            SCREEN.blit(FONT_CUSTOM.render(f"${cost}", True, (255, 215, 0)), (rect.x + 4, rect.y + 20))
         ready_rect = pygame.Rect(820, 550, 110, 38)
         pygame.draw.rect(SCREEN, (0, 180, 0) if self.ready_map.get(self.player_id, False) else (190, 40, 40), ready_rect, border_radius=4)
-        SCREEN.blit(BIG_FONT.render("READY", True, (255, 255, 255)), (ready_rect.x + 25, ready_rect.y + 7))
+        SCREEN.blit(FONT_CUSTOM.render("READY", True, (255, 255, 255)), (ready_rect.x + 25, ready_rect.y + 7))
 
     def draw_game(self):
         self.draw_sidebar()
