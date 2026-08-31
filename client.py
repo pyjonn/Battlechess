@@ -838,17 +838,6 @@ class ClientApp:
             draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
             collision_radius = draw_radius
 
-            if not u.get("is_moving", False):
-                foot_offset = 0
-                left_foot_x = sx - math.sin(s_angle) * (draw_radius * 0.6) + math.cos(s_angle) * foot_offset
-                left_foot_y = sy + math.cos(s_angle) * (draw_radius * 0.6) + math.sin(s_angle) * foot_offset
-                right_foot_x = sx + math.sin(s_angle) * (draw_radius * 0.6) - math.cos(s_angle) * foot_offset
-                right_foot_y = sy - math.cos(s_angle) * (draw_radius * 0.6) - math.sin(s_angle) * foot_offset
-
-                foot_radius = max(1, int(draw_radius * 0.25))
-                pygame.draw.circle(SCREEN, (20, 20, 20), (int(left_foot_x), int(left_foot_y)), foot_radius)
-                pygame.draw.circle(SCREEN, (20, 20, 20), (int(right_foot_x), int(right_foot_y)), foot_radius)
-
             if u["id"] in self.selected_units:
                 pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
 
