@@ -153,6 +153,15 @@ class ClientApp:
             }
             return ffa_colors.get(owner, (255, 255, 255))
 
+    def is_tile_visible(self, wx, wy):
+        if not self.fog_enabled or self.game_state == "SHOP":
+            return True
+        my_units = [u for u in self.units if u["owner"] == self.player_id]
+        for u in my_units:
+            if math.hypot(wx - u["x"], wy - u["y"]) <= 200.0:
+                return True
+        return False
+
     def update_default_zoom(self):
         self.zoom = 1.0
         self.camera_x = 0.0
@@ -269,6 +278,7 @@ class ClientApp:
             self.water_level = msg.get("water_level", -0.5)
             self.starting_gold = msg["starting_gold"]
             self.game_mode = msg.get("game_mode", "FFA")
+            self.fog_enabled = msg.get("fog_enabled", False)
             self.update_default_zoom()
         elif mtype == "USERNAMES_UPDATE":
             self.usernames = {int(k): v for k, v in msg["usernames"].items()}
@@ -293,7 +303,7 @@ class ClientApp:
         elif mtype == "GOLD_SETTING_UPDATE":
             self.starting_gold = msg["starting_gold"]
         elif mtype == "SETTINGS_UPDATE":
-            self.fog_enabled = msg.get("fog", self.fog_enabled)
+            self.fog_enabled = msg.get("fog_enabled", self.fog_enabled)
             self.water_enabled = msg.get("water", self.water_enabled)
             self.game_mode = msg.get("game_mode", self.game_mode)
             if "water_rising" in msg:
@@ -492,6 +502,8 @@ class ClientApp:
                         self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
                     elif event.key == pygame.K_w:
                         self.send({"type": "SET_WATER_RISING", "rising": not self.water_rising})
+                    elif event.key == pygame.K_f:
+                        self.send({"type": "TOGGLE_FOG"})
                     elif event.key == pygame.K_m:
                         self.send({"type": "TOGGLE_MODE"})
                     elif event.key == pygame.K_SPACE:
@@ -694,6 +706,9 @@ class ClientApp:
 
         for r in range(self.board_size):
             for c in range(self.board_size):
+                wx = c * ts_world + ts_world / 2.0
+                wy = r * ts_world + ts_world / 2.0
+
                 if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
                     h = self.heightmap[r][c]
 
@@ -712,8 +727,8 @@ class ClientApp:
                 else:
                     color = (105, 185, 85)
 
-                wx = c * ts_world + ts_world / 2.0
-                wy = r * ts_world + ts_world / 2.0
+                if not self.is_tile_visible(wx, wy):
+                    color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
 
                 if self.game_state == "SHOP":
                     is_my_side = True
@@ -773,19 +788,24 @@ class ClientApp:
                     pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
 
         for p in self.particles:
-            sx, sy = self.to_screen_coords(p["x"], p["y"])
-            radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
-            pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
+            if self.is_tile_visible(p["x"], p["y"]):
+                sx, sy = self.to_screen_coords(p["x"], p["y"])
+                radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
+                pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
         for p in self.projectiles:
-            sx, sy = self.to_screen_coords(p["x"], p["y"])
-            s_angle = self.to_screen_angle(p["angle"])
-            end_x = sx + int(10 * self.zoom * math.cos(s_angle))
-            end_y = sy + int(10 * self.zoom * math.sin(s_angle))
-            pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
+            if self.is_tile_visible(p["x"], p["y"]):
+                sx, sy = self.to_screen_coords(p["x"], p["y"])
+                s_angle = self.to_screen_angle(p["angle"])
+                end_x = sx + int(10 * self.zoom * math.cos(s_angle))
+                end_y = sy + int(10 * self.zoom * math.sin(s_angle))
+                pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
 
         for u in self.units:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
+                continue
+
+            if not self.is_tile_visible(u["x"], u["y"]):
                 continue
 
             sx, sy = self.to_screen_coords(u["x"], u["y"])
@@ -898,6 +918,9 @@ class ClientApp:
         for u in self.units:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
                 continue
+            if not self.is_tile_visible(u["x"], u["y"]):
+                continue
+
             if self.player_id == 0:   rwx, rwy = cx - (u["x"] - cx), cy - (u["y"] - cy)
             elif self.player_id == 2: rwx, rwy = cx + (u["y"] - cy), cy - (u["x"] - cx)
             elif self.player_id == 3: rwx, rwy = cx - (u["y"] - cy), cy + (u["x"] - cx)
@@ -929,7 +952,7 @@ class ClientApp:
 
         pygame.draw.rect(SCREEN, (30, 30, 35), (40, 65, 870, 25))
 
-        settings_txt = FONT.render(f"Mode: {self.game_mode} (M) | Size: {self.board_size} (UP/DN) | Gold: ${self.starting_gold} (L/R) | Water: {self.water_rising} (W)", True, (200, 220, 100))
+        settings_txt = FONT.render(f"Mode: {self.game_mode} (M) | Size: {self.board_size} (UP/DN) | Gold: ${self.starting_gold} (L/R) | Water: {self.water_rising} (W) | Fog: {self.fog_enabled} (F)", True, (200, 220, 100))
         SCREEN.blit(settings_txt, (40, 65))
 
         is_host = (self.player_id == self.host_id)

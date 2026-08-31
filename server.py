@@ -203,7 +203,6 @@ def get_height_at_pos(wx, wy, heightmap, board_size):
     return top + fy * (bottom - top)
 
 def get_height_modifier(current_pos, next_pos, heightmap, board_size):
-
     h_curr = get_height_at_pos(current_pos[0], current_pos[1], heightmap, board_size)
     h_next = get_height_at_pos(next_pos[0], next_pos[1], heightmap, board_size)
     return h_next - h_curr
@@ -343,7 +342,8 @@ class Server:
             "starting_gold": self.starting_gold,
             "game_mode": self.game_mode,
             "win_condition": self.win_condition,
-            "target_score": self.target_score
+            "target_score": self.target_score,
+            "fog_enabled": self.fog_enabled
         }) + "\n").encode('utf-8'))
 
         buffer = ""
@@ -416,6 +416,19 @@ class Server:
                 "target_score": self.target_score,
                 "game_mode": self.game_mode,
                 "water_rising": self.water_rising_enabled,
+                "fog_enabled": self.fog_enabled,
+                "heightmap": self.heightmap
+            })
+
+        elif mtype == "TOGGLE_FOG" and pid == self.host_id and self.state == "LOBBY":
+            self.fog_enabled = not self.fog_enabled
+            self.broadcast({
+                "type": "SETTINGS_UPDATE",
+                "fog_enabled": self.fog_enabled,
+                "win_condition": self.win_condition,
+                "target_score": self.target_score,
+                "game_mode": self.game_mode,
+                "water_rising": self.water_rising_enabled,
                 "heightmap": self.heightmap
             })
 
@@ -427,6 +440,7 @@ class Server:
                 "target_score": self.target_score,
                 "game_mode": self.game_mode,
                 "water_rising": self.water_rising_enabled,
+                "fog_enabled": self.fog_enabled,
                 "heightmap": self.heightmap
             })
 
@@ -438,7 +452,7 @@ class Server:
         elif mtype == "SET_WATER_RISING" and pid == self.host_id and self.state == "LOBBY":
             self.water_rising_enabled = msg["rising"]
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
-            self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled, "heightmap": self.heightmap})
+            self.broadcast({"type": "SETTINGS_UPDATE", "water_rising": self.water_rising_enabled, "fog_enabled": self.fog_enabled, "heightmap": self.heightmap})
 
         elif mtype == "SET_STARTING_GOLD" and pid == self.host_id and self.state == "LOBBY":
             self.starting_gold = max(100, min(10000, msg["starting_gold"]))
@@ -446,7 +460,7 @@ class Server:
 
         elif mtype == "TOGGLE_MODE" and pid == self.host_id and self.state == "LOBBY":
             self.game_mode = "2v2" if self.game_mode == "FFA" else "FFA"
-            self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode, "win_condition": self.win_condition, "target_score": self.target_score})
+            self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode, "win_condition": self.win_condition, "target_score": self.target_score, "fog_enabled": self.fog_enabled})
 
         elif mtype == "START_GAME" and pid == self.host_id and self.state == "LOBBY":
             logging.info("Host started the game. Transitioning to SHOP phase.")
