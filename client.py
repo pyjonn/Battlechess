@@ -364,14 +364,16 @@ class ClientApp:
             new_unit_ids = {u["id"] for u in self.units}
             for uid, old_u in old_units.items():
                 if uid not in new_unit_ids:
+                    rad = old_u.get("draw_radius", 25)
                     for _ in range(15):
                         angle = random.uniform(0, math.pi * 2)
-                        speed = random.uniform(20, 80)
+                        speed = random.uniform(rad * 0.8, rad * 3.2)
+                        life = rad * 0.02
                         self.particles.append({
                             "x": old_u["x"], "y": old_u["y"],
                             "vx": math.cos(angle) * speed,
                             "vy": math.sin(angle) * speed,
-                            "life": 0.5, "max_life": 0.5,
+                            "life": life, "max_life": life,
                             "color": self.get_player_color(old_u["owner"])
                         })
             self.projectiles = msg.get("projectiles", [])
@@ -577,12 +579,6 @@ class ClientApp:
                         "append_path": is_shift
                     })
 
-            elif event.button == 2:
-                if smx > 250 and smy > 40:
-                    self.right_dragging = True
-                    self.pan_start_pos = (smx, smy)
-                    self.pan_start_cam = (self.camera_x, self.camera_y)
-
         elif event.type == pygame.MOUSEBUTTONUP:
             smx, smy = event.pos
             if event.button == 1:
@@ -616,19 +612,6 @@ class ClientApp:
                                     if select_rect.collidepoint(usx, usy):
                                         self.selected_units.add(u["id"])
 
-            elif event.button == 2:
-                self.right_dragging = False
-
-        elif event.type == pygame.MOUSEMOTION:
-            if self.right_dragging and self.pan_start_pos and self.pan_start_cam:
-                mx, my = event.pos
-                dx = mx - self.pan_start_pos[0]
-                dy = my - self.pan_start_pos[1]
-                scale = self.zoom * (500.0 / WORLD_SIZE)
-                max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
-                self.camera_x = max(0.0, min(max_cam, self.pan_start_cam[0] - dx / scale))
-                self.camera_y = max(0.0, min(max_cam, self.pan_start_cam[1] - dy / scale))
-
     def handle_common_board_events(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_m:
@@ -640,6 +623,25 @@ class ClientApp:
         elif event.type == pygame.MOUSEWHEEL:
             target_zoom = max(1.0, min(4.0, self.zoom * 1.15 if event.y > 0 else self.zoom / 1.15))
             self.zoom_at(pygame.mouse.get_pos(), target_zoom)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 2:
+                smx, smy = event.pos
+                if smx > 250 and smy > 40:
+                    self.right_dragging = True
+                    self.pan_start_pos = (smx, smy)
+                    self.pan_start_cam = (self.camera_x, self.camera_y)
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 2:
+                self.right_dragging = False
+        elif event.type == pygame.MOUSEMOTION:
+            if getattr(self, "right_dragging", False) and getattr(self, "pan_start_pos", None) and getattr(self, "pan_start_cam", None):
+                mx, my = event.pos
+                dx = mx - self.pan_start_pos[0]
+                dy = my - self.pan_start_pos[1]
+                scale = self.zoom * (500.0 / WORLD_SIZE)
+                max_cam = max(0.0, WORLD_SIZE - (WORLD_SIZE / self.zoom))
+                self.camera_x = max(0.0, min(max_cam, self.pan_start_cam[0] - dx / scale))
+                self.camera_y = max(0.0, min(max_cam, self.pan_start_cam[1] - dy / scale))
 
     def zoom_at(self, mouse_pos, new_zoom):
             wx_before, wy_before = self.to_world_coords(mouse_pos[0], mouse_pos[1])

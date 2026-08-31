@@ -67,7 +67,12 @@ def sample_smooth_noise(grid, x, y):
     bottom = v01 + sx * (v11 - v01)
     return top + sy * (bottom - top)
 
-def find_nearest_enemy_in_path(unit, enemies, scan_radius=80.0, max_leash=90.0):
+def find_nearest_enemy_in_path(unit, enemies, scan_radius=None, max_leash=None):
+    if scan_radius is None:
+        scan_radius = unit["radius"] * 6.0
+    if max_leash is None:
+        max_leash = unit["radius"] * 7.0
+
     closest_enemy = None
     min_dist = scan_radius
 
@@ -90,7 +95,12 @@ def find_nearest_enemy_in_path(unit, enemies, scan_radius=80.0, max_leash=90.0):
 
     return closest_enemy
 
-def find_nearest_hurt_ally(unit, allies, scan_radius=250.0, max_leash=200.0):
+def find_nearest_hurt_ally(unit, allies, scan_radius=None, max_leash=None):
+    if scan_radius is None:
+        scan_radius = unit["radius"] * 10.0
+    if max_leash is None:
+        max_leash = unit["radius"] * 8.0
+
     closest_ally = None
     min_dist = scan_radius
 
@@ -159,7 +169,6 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
     else:
         protected_positions = [(400, 680), (400, 120), (120, 400), (680, 400)]
 
-    # FIXED CODE:
     for wx, wy in protected_positions:
         center_c = int(wx / tile_pixel_size)
         center_r = int(wy / tile_pixel_size)
@@ -170,11 +179,8 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
             for c in range(max(0, int(center_c - island_radius)), min(size, int(center_c + island_radius + 1))):
                 dist = math.hypot(c - center_c, r - center_r)
                 if dist <= island_radius:
-                    # Smooth falloff factor from 1.0 at center to 0.0 at edge
                     factor = 1.0 - (dist / island_radius)
                     smooth = factor * factor * (3.0 - 2.0 * factor)
-
-                    # Smoothly raise underwater tiles up to target land height without overflowing
                     if grid[r][c] < target_land_height:
                         grid[r][c] = max(grid[r][c], grid[r][c] * (1.0 - smooth) + target_land_height * smooth)
     return grid
@@ -210,7 +216,7 @@ def get_height_modifier(current_pos, next_pos, heightmap, board_size):
     return h_next - h_curr
 
 def has_cone_vision(viewer, target_x, target_y):
-    max_range = 200.0
+    max_range = viewer["radius"] * 10.0
     dx = target_x - viewer["x"]
     dy = target_y - viewer["y"]
     dist = math.hypot(dx, dy)
@@ -764,12 +770,14 @@ class Server:
 
                     if not target and not u.get("target_unit"):
                         friendlies = [e for e in self.units if not self.is_enemy(e["owner"], u["owner"]) and e["hp"] < e["max_hp"] and e["id"] != u["id"]]
-                        target = find_nearest_hurt_ally(u, friendlies)
+                        scan_range = u["radius"] * 10.0
+                        leash_range = u["radius"] * 8.0
+                        target = find_nearest_hurt_ally(u, friendlies, scan_radius=scan_range, max_leash=leash_range)
                         if target:
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
                             enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                            nearby_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=500.0, max_leash=9999.0)
+                            nearby_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=u["radius"] * 12.0, max_leash=9999.0)
                             if not nearby_enemy:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
@@ -780,45 +788,36 @@ class Server:
 
                         if target:
                             guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            max_leash = 150.0 if u["type"] == "Knight" else 120.0
+                            max_leash = u["radius"] * 30.0 if u["type"] == "Knight" else u["radius"] * 7.0
                             if guard_dist > max_leash:
                                 target = None
                                 u["target_unit"] = None
 
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = 140.0 if u["type"] == "Knight" else 100.0
-                        leash_range = 150.0 if u["type"] == "Knight" else 120.0
+                        scan_range = u["radius"] * 28.0 if u["type"] == "Knight" else u["radius"] * 6.0
+                        leash_range = u["radius"] * 30.0 if u["type"] == "Knight" else u["radius"] * 7.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
                             target = closest_enemy
                             u["target_unit"] = target["id"]
                         elif not u.get("waypoints"):
-                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=50.0)
+                            any_enemy_near = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=u["radius"] * 3.0)
                             if not any_enemy_near:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                    if u["type"] == "Knight" and target:
-                        archer_range = 175.0
-                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
-
-                        desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                        u["angle"] = lerp_angle(u["angle"], desired_angle, 0.25)
-
-                        if e_dist <= archer_range:
-                            u["waypoints"] = []
+                    if u["type"] == "Knight":
+                        # Archers hold position and do not move automatically toward targets
+                        if not u.get("waypoints"):
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
                             u["is_moving"] = False
 
-                    if target and u.get("target_unit"):
-                        archer_range = 175.0 if u["type"] == "Knight" else 0.0
-                        e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
-                        if u["type"] != "Knight" or e_dist > archer_range:
-                            u["target_x"] = target["x"]
-                            u["target_y"] = target["y"]
+                    elif target and u.get("target_unit"):
+                        u["target_x"] = target["x"]
+                        u["target_y"] = target["y"]
 
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
@@ -881,7 +880,7 @@ class Server:
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Knight":
-                        archer_range = 350.0
+                        archer_range = u["radius"] * 28.0
                         projectile_life = max(1, int(archer_range / 11.0))
 
                         if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
@@ -900,14 +899,14 @@ class Server:
                             })
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
                     elif u["type"] == "Healer":
-                        heal_range = (u["radius"] + target["radius"] + 10)
+                        heal_range = (u["radius"] + target["radius"]) * 1.2
                         if e_dist < heal_range and in_front and now - u["last_attack"] > 0.8:
                             u["last_attack"] = now
                             target["hp"] = min(target["max_hp"], target["hp"] + 15)
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
                     elif u["type"] != "Block":
-                        attack_range = (u["radius"] + target["radius"] + 14)
+                        attack_range = (u["radius"] + target["radius"]) * 1.25
                         cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
                         damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
 
@@ -1020,8 +1019,5 @@ class Server:
             threading.Thread(target=self.handle_client, args=(current_id, conn), daemon=True).start()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Realtime Chess Game Server")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
-    args = parser.parse_args()
-    setup_logging(args.verbose)
+    setup_logging(verbose=False)
     Server().run()
