@@ -159,6 +159,7 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
     else:
         protected_positions = [(400, 680), (400, 120), (120, 400), (680, 400)]
 
+    # FIXED CODE:
     for wx, wy in protected_positions:
         center_c = int(wx / tile_pixel_size)
         center_r = int(wy / tile_pixel_size)
@@ -169,12 +170,13 @@ def generate_heightmap(size, water_enabled, units=None, water_rising=False):
             for c in range(max(0, int(center_c - island_radius)), min(size, int(center_c + island_radius + 1))):
                 dist = math.hypot(c - center_c, r - center_r)
                 if dist <= island_radius:
-                    blend = dist / island_radius
-                    smooth = blend * blend * (3 - 2 * smooth if 'smooth' in locals() else 3 - 2 * blend)
-                    original_h = grid[r][c]
-                    if original_h < target_land_height:
-                        boosted_h = (target_land_height * (1.0 - smooth)) + (original_h * smooth)
-                        grid[r][c] = max(original_h, boosted_h)
+                    # Smooth falloff factor from 1.0 at center to 0.0 at edge
+                    factor = 1.0 - (dist / island_radius)
+                    smooth = factor * factor * (3.0 - 2.0 * factor)
+
+                    # Smoothly raise underwater tiles up to target land height without overflowing
+                    if grid[r][c] < target_land_height:
+                        grid[r][c] = max(grid[r][c], grid[r][c] * (1.0 - smooth) + target_land_height * smooth)
     return grid
 
 def get_height_at_pos(wx, wy, heightmap, board_size):
