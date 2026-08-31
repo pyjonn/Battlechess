@@ -63,7 +63,7 @@ if not FOOTSTEP_SOUNDS:
     FOOTSTEP_SOUNDS = [generate_noise(0.05, 0.15), generate_noise(0.05, 0.15)]
 
 MELEE_PITCHES = {
-    "Pawn": 1.2, "Bishop": 1.4, "Queen": 1.0, "King": 0.8, "Rook": 0.6, "Healer": 1.5, "Block": 0.5
+    "Pawn": 1.2, "Bishop": 1.4, "Queen": 1.0, "King": 0.8, "Rook": 0.6, "Healer": 1.5, "Shieldman": 0.5
 }
 
 def play_pitched_melee(unit_type):
@@ -83,7 +83,7 @@ SHOP_ITEMS = [
     ("Knight", 150),
     ("Bishop", 140),
     ("Healer", 180),
-    ("Block", 120),
+    ("Shieldman", 120),
     ("Rook", 250),
     ("Queen", 400)
 ]
@@ -134,6 +134,23 @@ class ClientApp:
         self.camera_y = 0.0
         self.show_minimap = True
         self.selected_shop_item = None
+
+        self.textures = {}
+        unit_types = ["Pawn", "Knight", "Bishop", "Healer", "Shieldman", "Rook", "Queen", "King"]
+        for u_type in unit_types:
+            self.textures[u_type] = {
+                "base": self.load_texture(f"textures/{u_type}.png"),
+                "f": self.load_texture(f"textures/{u_type}f.png"),
+                "b": self.load_texture(f"textures/{u_type}b.png")
+            }
+
+    def load_texture(self, path):
+        if os.path.exists(path):
+            try:
+                return pygame.image.load(path).convert_alpha()
+            except Exception as e:
+                print(f"Failed to load {path}: {e}")
+        return None
 
     def get_player_color(self, owner):
         if self.game_mode == "2v2":
@@ -565,7 +582,7 @@ class ClientApp:
 
                     target_unit_id = None
                     for u in self.units:
-                        u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
+                        u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Shieldman") else 2.0
                         u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                         if math.hypot(u["x"] - wmx, u["y"] - wmy) < u_radius_world:
                             target_unit_id = u["id"]
@@ -595,7 +612,7 @@ class ClientApp:
                                 self.selected_units.clear()
                             for u in self.units:
                                 if u["owner"] == self.player_id:
-                                    u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
+                                    u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Shieldman") else 2.0
                                     u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
@@ -706,12 +723,10 @@ class ClientApp:
                 ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
                 rect_size = math.ceil(ts_screen) + 1
 
-                # High-contrast color definitions
-                COLOR_WHITE = (255, 255, 255) # Top height terrain
-                COLOR_GREY  = (100, 105, 120) # Mid height terrain (Darker gray for contrast)
-                # Terrain color definitions for dark-to-light green gradient
-                COLOR_DARK_GREEN  = (0, 100, 0)   # Lower terrain
-                COLOR_LIGHT_GREEN = (140, 230, 80) # Higher terrain
+                COLOR_WHITE = (255, 255, 255)
+                COLOR_GREY  = (100, 105, 120)
+                COLOR_DARK_GREEN  = (0, 100, 0)
+                COLOR_LIGHT_GREEN = (140, 230, 80)
 
                 for r in range(self.board_size):
                     for c in range(self.board_size):
@@ -722,12 +737,9 @@ class ClientApp:
                             h = self.heightmap[r][c]
 
                             if h <= self.water_level:
-                                color = (0, 120, 245)  # Vibrant Water
+                                color = (0, 120, 245)
                             else:
-                                # Normalize height above water level to a 0.0 -> 1.0 scale
                                 norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
-
-                                # Linear interpolation from Dark Green (low) to Light Green (high)
                                 color = (
                                     int(COLOR_DARK_GREEN[0] + norm_h * (COLOR_LIGHT_GREEN[0] - COLOR_DARK_GREEN[0])),
                                     int(COLOR_DARK_GREEN[1] + norm_h * (COLOR_LIGHT_GREEN[1] - COLOR_DARK_GREEN[1])),
@@ -821,7 +833,7 @@ class ClientApp:
             s_angle = self.to_screen_angle(u["angle"])
             color = self.get_player_color(u["owner"])
 
-            block_width = 2.4 if u["type"] in ("Queen", "Rook", "Block") else 2.0
+            block_width = 2.4 if u["type"] in ("Queen", "Rook", "Shieldman") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
             draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
             collision_radius = draw_radius
@@ -840,20 +852,47 @@ class ClientApp:
             if u["id"] in self.selected_units:
                 pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
 
-            shape = u["shape"]
-            draw_color = (255, 255, 255) if u.get("is_hit", False) else color
-            if shape == "circle":
-                pygame.draw.circle(SCREEN, draw_color, (int(sx), int(sy)), draw_radius)
-            elif shape == "square":
-                pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - draw_radius, draw_radius * 2, draw_radius * 2))
-            elif shape == "cross":
-                th = max(2, int(draw_radius * 0.6))
-                pygame.draw.rect(SCREEN, draw_color, (int(sx) - th//2, int(sy) - draw_radius, th, draw_radius * 2))
-                pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - th//2, draw_radius * 2, th))
+            img_size = draw_radius * 2
+            unit_tex = self.textures.get(u["type"])
+            current_img = None
+
+            if unit_tex:
+                if u.get("is_moving", False):
+                    if (self.anim_tick // 15) % 2 == 0:
+                        current_img = unit_tex["f"]
+                    else:
+                        current_img = unit_tex["b"]
+
+                    if current_img is None:
+                        current_img = unit_tex["base"]
+                else:
+                    current_img = unit_tex["base"]
+
+            if current_img:
+                scaled_img = pygame.transform.scale(current_img, (img_size, img_size))
+                deg_angle = math.degrees(-s_angle) - 90
+                rotated_img = pygame.transform.rotate(scaled_img, deg_angle)
+                rect = rotated_img.get_rect(center=(int(sx), int(sy)))
+
+                ring_color = (255, 255, 255) if u.get("is_hit", False) else color
+                pygame.draw.circle(SCREEN, ring_color, (int(sx), int(sy)), draw_radius + 2, 2)
+
+                SCREEN.blit(rotated_img, rect.topleft)
             else:
-                sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
-                points = [(sx + draw_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + draw_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
-                pygame.draw.polygon(SCREEN, draw_color, points)
+                shape = u["shape"]
+                draw_color = (255, 255, 255) if u.get("is_hit", False) else color
+                if shape == "circle":
+                    pygame.draw.circle(SCREEN, draw_color, (int(sx), int(sy)), draw_radius)
+                elif shape == "square":
+                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - draw_radius, draw_radius * 2, draw_radius * 2))
+                elif shape == "cross":
+                    th = max(2, int(draw_radius * 0.6))
+                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - th//2, int(sy) - draw_radius, th, draw_radius * 2))
+                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - th//2, draw_radius * 2, th))
+                else:
+                    sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
+                    points = [(sx + draw_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + draw_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
+                    pygame.draw.polygon(SCREEN, draw_color, points)
 
             hp_ratio = max(0, u["hp"] / u["max_hp"])
             bar_w = max(10, draw_radius * 2)

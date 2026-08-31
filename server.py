@@ -16,7 +16,7 @@ UNIT_SCORES = {
     "Knight": 2,
     "Bishop": 2,
     "Healer": 2,
-    "Block": 2,
+    "Shieldman": 2,
     "Rook": 3,
     "Queen": 4,
     "King": 5
@@ -29,7 +29,7 @@ UNIT_WEIGHTS = {
     "Healer": 0.8,
     "King": 1.5,
     "Rook": 3,
-    "Block": 3.5,
+    "Shieldman": 3.5,
     "Queen": 2.5,
 }
 
@@ -242,7 +242,7 @@ def get_unit_base_speed(unit_type):
         return 3.2
     elif unit_type == "King":
         return 1.4
-    elif unit_type in ("Rook", "Block"):
+    elif unit_type in ("Rook", "Shieldman"):
         return 1.0
     return 2.2
 
@@ -403,7 +403,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Block": 120, "Rook": 250, "Queen": 400}
+                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250, "Queen": 400}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -547,7 +547,7 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Block": 120, "Rook": 250, "Queen": 400}
+            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250, "Queen": 400}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
@@ -573,9 +573,9 @@ class Server:
 
                 shapes = {
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
-                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross", "Block": "square"
+                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross", "Shieldman": "square"
                 }
-                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Block": 250, "Rook": 200, "Queen": 300}
+                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Shieldman": 250, "Rook": 200, "Queen": 300}
 
                 tile_pixel_size = 800.0 / self.board_size
                 radius_multipliers = {
@@ -583,7 +583,7 @@ class Server:
                     "Knight": 1.0,
                     "Bishop": 1.1,
                     "Healer": 1.0,
-                    "Block": 1.2,
+                    "Shieldman": 1.2,
                     "Rook": 1.2,
                     "Queen": 1.3
                 }
@@ -591,7 +591,7 @@ class Server:
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
-                    "Block": int(tile_pixel_size * 1.4), "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
+                    "Shieldman": int(tile_pixel_size * 1.4), "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
                 }
 
                 self.units.append({
@@ -782,7 +782,7 @@ class Server:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                elif u["type"] != "Block":
+                elif u["type"] != "Shieldman":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
 
@@ -905,7 +905,7 @@ class Server:
                             target["hp"] = min(target["max_hp"], target["hp"] + 15)
                             target["is_hit"] = True
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
-                    elif u["type"] != "Block":
+                    elif u["type"] != "Shieldman":
                         attack_range = (u["radius"] + target["radius"]) * 1.25
                         cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
                         damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
