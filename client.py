@@ -309,7 +309,7 @@ class ClientApp:
             self.game_state = "LOBBY"
             self.state = "CONNECTED"
             self.units = []
-            self.projectiles = []
+            self.projectiles = []  # Clear projectiles on disconnect
             self.chat_messages.append(f"System: Player {msg['disconnected_id'] + 1} disconnected. Returned to lobby.")
         elif mtype == "CHAT":
             self.chat_messages.append(f"{msg['sender']}: {msg['text']}")
@@ -415,6 +415,7 @@ class ClientApp:
             if "kills" in msg:
                 self.kills = {int(k): v for k, v in msg["kills"].items()}
             self.game_state = "LOBBY"
+            self.projectiles = []  # Clear projectiles when game ends
             winner = msg['winner']
             if self.game_mode == "2v2":
                 self.chat_messages.append(f"System: Team {winner + 1} won!")

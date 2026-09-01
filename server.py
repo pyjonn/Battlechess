@@ -273,6 +273,7 @@ class Server:
 
         self.starting_gold = 2000
         self.state = "LOBBY"
+        self.projectiles = []
         self.gold = {}
         self.ready = {}
         self.next_unit_id = 1
@@ -977,6 +978,7 @@ class Server:
             if match_over:
                 self.award_win(match_winner)
                 self.state = "LOBBY"
+                self.projectiles = []  # Clear remaining arrows in the air when the round ends
                 self.broadcast({
                     "type": "GAME_OVER",
                     "winner": match_winner,
