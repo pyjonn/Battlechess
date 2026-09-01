@@ -63,7 +63,7 @@ if not FOOTSTEP_SOUNDS:
     FOOTSTEP_SOUNDS = [generate_noise(0.05, 0.15), generate_noise(0.05, 0.15)]
 
 MELEE_PITCHES = {
-    "Pawn": 1.2, "Bishop": 1.4, "King": 0.8, "Rook": 0.6, "Healer": 1.5, "Shieldman": 0.5
+    "Peasant": 1.2, "Runner": 1.4, "King": 0.8, "Knight": 0.6, "Medic": 1.5, "Shieldman": 0.5
 }
 
 def play_pitched_melee(unit_type):
@@ -80,12 +80,12 @@ TITLE_FONT = pygame.font.SysFont("Arial", 22, bold=True)
 FONT_CUSTOM = pygame.font.SysFont("Arial", 12, bold=True)
 
 SHOP_ITEMS = [
-    ("Pawn", 100),
-    ("Knight", 150),
-    ("Bishop", 140),
-    ("Healer", 180),
+    ("Peasant", 100),
+    ("Archer", 150),
+    ("Runner", 140),
+    ("Medic", 180),
     ("Shieldman", 120),
-    ("Rook", 250),
+    ("Knight", 250),
 ]
 
 WORLD_SIZE = 800.0
@@ -136,7 +136,7 @@ class ClientApp:
         self.selected_shop_item = None
 
         self.textures = {}
-        unit_types = ["Pawn", "Knight", "Bishop", "Healer", "Shieldman", "Rook", "King"]
+        unit_types = ["Peasant", "Archer", "Runner", "Medic", "Shieldman", "Knight", "King"]
         for u_type in unit_types:
             self.textures[u_type] = {
                 "base": self.load_texture(f"textures/{u_type}.png"),
@@ -357,7 +357,7 @@ class ClientApp:
             self.update_default_zoom()
         elif mtype == "ATTACK_SOUND":
             utype = msg.get("unit_type")
-            if utype == "Knight":
+            if utype == "Archer":
                 now = time.time()
                 if now - self.last_bow_time > 0.05:
                     if BOW_SOUND:
@@ -551,11 +551,11 @@ class ClientApp:
                         })
 
                 for i, (name, cost) in enumerate(SHOP_ITEMS):
-                    if pygame.Rect(260 + i * 75, 550, 70, 38).collidepoint(mx, my):
+                    if pygame.Rect(260 + i * 95, 550, 90, 38).collidepoint(mx, my):
                         self.selected_shop_item = name
                         break
 
-                if pygame.Rect(820, 550, 110, 38).collidepoint(mx, my):
+                if pygame.Rect(830, 550, 110, 38).collidepoint(mx, my):
                     self.send({"type": "READY_SHOP"})
 
             elif event.button == 3:
@@ -582,7 +582,7 @@ class ClientApp:
 
                     target_unit_id = None
                     for u in self.units:
-                        u_blocks = 2.4 if u["type"] in ( "Rook", "Shieldman") else 2.0
+                        u_blocks = 2.4 if u["type"] in ( "Knight", "Shieldman") else 2.0
                         u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                         if math.hypot(u["x"] - wmx, u["y"] - wmy) < u_radius_world:
                             target_unit_id = u["id"]
@@ -612,7 +612,7 @@ class ClientApp:
                                 self.selected_units.clear()
                             for u in self.units:
                                 if u["owner"] == self.player_id:
-                                    u_blocks = 2.4 if u["type"] in ( "Rook", "Shieldman") else 2.0
+                                    u_blocks = 2.4 if u["type"] in ( "Knight", "Shieldman") else 2.0
                                     u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
@@ -833,7 +833,7 @@ class ClientApp:
             s_angle = self.to_screen_angle(u["angle"])
             color = self.get_player_color(u["owner"])
 
-            block_width = 2.4 if u["type"] in ( "Rook", "Shieldman") else 2.0
+            block_width = 2.4 if u["type"] in ( "Knight", "Shieldman") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
             draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
             collision_radius = draw_radius
@@ -1025,15 +1025,15 @@ class ClientApp:
         SCREEN.blit(TITLE_FONT.render(f"Buy Phase - Gold: ${self.gold}", True, (255, 215, 0)), (265, 8))
 
         for i, (name, cost) in enumerate(SHOP_ITEMS):
-            rect = pygame.Rect(260 + i * 75, 550, 70, 38)
+            rect = pygame.Rect(260 + i * 95, 550, 90, 38)
             bg_color = (80, 120, 80) if getattr(self, "selected_shop_item", None) == name else (50, 50, 75)
             pygame.draw.rect(SCREEN, bg_color, rect, border_radius=4)
             if name == "Shieldman":
-                SCREEN.blit(FONT_CUSTOM.render(f"+ Shield", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
+                SCREEN.blit(FONT_CUSTOM.render(f"+ Shieldman", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
             else:
                 SCREEN.blit(FONT_CUSTOM.render(f"+ {name}", True, (255, 255, 255)), (rect.x + 4, rect.y + 4))
             SCREEN.blit(FONT_CUSTOM.render(f"${cost}", True, (255, 215, 0)), (rect.x + 4, rect.y + 20))
-        ready_rect = pygame.Rect(820, 550, 110, 38)
+        ready_rect = pygame.Rect(830, 550, 110, 38)
         pygame.draw.rect(SCREEN, (0, 180, 0) if self.ready_map.get(self.player_id, False) else (190, 40, 40), ready_rect, border_radius=4)
         SCREEN.blit(FONT_CUSTOM.render("READY", True, (255, 255, 255)), (ready_rect.x + 25, ready_rect.y + 7))
 

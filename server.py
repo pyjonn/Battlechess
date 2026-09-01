@@ -12,22 +12,22 @@ HOST = "0.0.0.0"
 PORT = 5555
 
 UNIT_SCORES = {
-    "Pawn": 1,
-    "Knight": 2,
-    "Bishop": 2,
-    "Healer": 2,
+    "Peasant": 1,
+    "Archer": 2,
+    "Runner": 2,
+    "Medic": 2,
     "Shieldman": 2,
-    "Rook": 3,
+    "Knight": 3,
     "King": 5
 }
 
 UNIT_WEIGHTS = {
-    "Pawn": 1.0,
-    "Knight": 0.8,
-    "Bishop": 0.9,
-    "Healer": 0.8,
+    "Peasant": 1.0,
+    "Archer": 0.8,
+    "Runner": 0.9,
+    "Medic": 0.8,
     "King": 1.5,
-    "Rook": 3,
+    "Knight": 3,
     "Shieldman": 3.5,
 }
 
@@ -236,11 +236,11 @@ def lerp_angle(current, target, max_delta):
     return target
 
 def get_unit_base_speed(unit_type):
-    if unit_type == "Bishop":
+    if unit_type == "Runner":
         return 3.2
     elif unit_type == "King":
         return 1.4
-    elif unit_type in ("Rook", "Shieldman"):
+    elif unit_type in ("Knight", "Shieldman"):
         return 1.0
     return 2.2
 
@@ -401,7 +401,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250}
+                    costs = {"Peasant": 100, "Archer": 150, "Runner": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -545,50 +545,50 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250}
+            costs = {"Peasant": 100, "Archer": 150, "Runner": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
             if self.gold.get(pid, 0) >= cost and "x" in msg and "y" in msg:
-                spawn_x, spawn_y = msg["x"], msg["y"]
-                if not (0 <= spawn_x <= 800 and 0 <= spawn_y <= 800):
+                sPeasant_x, sPeasant_y = msg["x"], msg["y"]
+                if not (0 <= sPeasant_x <= 800 and 0 <= sPeasant_y <= 800):
                     return
 
                 valid_side = True
-                if pid == 0 and spawn_y < 400: valid_side = False
-                elif pid == 1 and spawn_y > 400: valid_side = False
-                elif pid == 2 and spawn_x > 400: valid_side = False
-                elif pid == 3 and spawn_x < 400: valid_side = False
+                if pid == 0 and sPeasant_y < 400: valid_side = False
+                elif pid == 1 and sPeasant_y > 400: valid_side = False
+                elif pid == 2 and sPeasant_x > 400: valid_side = False
+                elif pid == 3 and sPeasant_x < 400: valid_side = False
 
                 if not valid_side:
                     return
 
-                terrain_height = get_height_at_pos(spawn_x, spawn_y, self.heightmap, self.board_size)
+                terrain_height = get_height_at_pos(sPeasant_x, sPeasant_y, self.heightmap, self.board_size)
                 if terrain_height <= self.water_level:
                     return
 
                 self.gold[pid] -= cost
 
                 shapes = {
-                    "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
-                    "Bishop": "triangle", "Healer": "cross", "Shieldman": "square"
+                    "Peasant": "circle", "Knight": "square", "Archer": "pentagon",
+                    "Runner": "triangle", "Medic": "cross", "Shieldman": "square"
                 }
-                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Shieldman": 250, "Rook": 200}
+                max_hps = {"Peasant": 70, "Archer": 20, "Runner": 75, "Medic": 90, "Shieldman": 250, "Knight": 200}
 
                 tile_pixel_size = 800.0 / self.board_size
                 radius_multipliers = {
-                    "Pawn": 0.9,
-                    "Knight": 1.0,
-                    "Bishop": 1.1,
-                    "Healer": 1.0,
+                    "Peasant": 0.9,
+                    "Archer": 1.0,
+                    "Runner": 1.1,
+                    "Medic": 1.0,
                     "Shieldman": 1.2,
-                    "Rook": 1.2,
+                    "Knight": 1.2,
                 }
                 four_block_radius = (int(2.0 * tile_pixel_size) / 2) * radius_multipliers.get(utype, 1.0)
                 draw_radii = {
-                    "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
-                    "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
-                    "Shieldman": int(tile_pixel_size * 1.4), "Rook": int(tile_pixel_size * 1.3)
+                    "Peasant": int(tile_pixel_size * 1.2), "Archer": int(tile_pixel_size * 1.4),
+                    "Runner": int(tile_pixel_size * 1.3), "Medic": int(tile_pixel_size * 1.3),
+                    "Shieldman": int(tile_pixel_size * 1.4), "Knight": int(tile_pixel_size * 1.3)
                 }
 
                 self.units.append({
@@ -596,12 +596,12 @@ class Server:
                     "owner": pid,
                     "type": utype,
                     "shape": shapes[utype],
-                    "x": spawn_x,
-                    "y": spawn_y,
-                    "target_x": spawn_x,
-                    "target_y": spawn_y,
-                    "guard_x": spawn_x,
-                    "guard_y": spawn_y,
+                    "x": sPeasant_x,
+                    "y": sPeasant_y,
+                    "target_x": sPeasant_x,
+                    "target_y": sPeasant_y,
+                    "guard_x": sPeasant_x,
+                    "guard_y": sPeasant_y,
                     "waypoints": [],
                     "hp": max_hps[utype],
                     "max_hp": max_hps[utype],
@@ -758,7 +758,7 @@ class Server:
                         u["target_unit"] = None
                         u["target_x"], u["target_y"] = wp_x, wp_y
 
-                if u["type"] == "Healer":
+                if u["type"] == "Medic":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and not self.is_enemy(e["owner"], u["owner"])), None)
                         if target and target["hp"] >= target["max_hp"]:
@@ -785,15 +785,15 @@ class Server:
 
                         if target:
                             guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            max_leash = u["radius"] * 30.0 if u["type"] == "Knight" else u["radius"] * 7.0
+                            max_leash = u["radius"] * 30.0 if u["type"] == "Archer" else u["radius"] * 7.0
                             if guard_dist > max_leash:
                                 target = None
                                 u["target_unit"] = None
 
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = u["radius"] * 28.0 if u["type"] == "Knight" else u["radius"] * 6.0
-                        leash_range = u["radius"] * 30.0 if u["type"] == "Knight" else u["radius"] * 7.0
+                        scan_range = u["radius"] * 28.0 if u["type"] == "Archer" else u["radius"] * 6.0
+                        leash_range = u["radius"] * 30.0 if u["type"] == "Archer" else u["radius"] * 7.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
@@ -805,7 +805,7 @@ class Server:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                    if u["type"] == "Knight":
+                    if u["type"] == "Archer":
                         # Archers hold position and do not move automatically toward targets
                         if not u.get("waypoints"):
                             u["target_x"] = u["x"]
@@ -876,7 +876,7 @@ class Server:
 
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
-                    if u["type"] == "Knight":
+                    if u["type"] == "Archer":
                         archer_range = u["radius"] * 28.0
                         projectile_life = max(1, int(archer_range / 11.0))
 
@@ -894,18 +894,18 @@ class Server:
                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
                                 "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life
                             })
-                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Knight"})
-                    elif u["type"] == "Healer":
+                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
+                    elif u["type"] == "Medic":
                         heal_range = (u["radius"] + target["radius"]) * 1.2
                         if e_dist < heal_range and in_front and now - u["last_attack"] > 0.8:
                             u["last_attack"] = now
                             target["hp"] = min(target["max_hp"], target["hp"] + 15)
                             target["is_hit"] = True
-                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Healer"})
+                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Medic"})
                     elif u["type"] != "Shieldman":
                         attack_range = (u["radius"] + target["radius"]) * 1.25
-                        cooldown = 0.6 if u["type"] == "Bishop" else (1.0 if u["type"] == "King" else 0.8)
-                        damage_val = 18 if u["type"] == "Bishop" else (30 if u["type"] == "King" else 20)
+                        cooldown = 0.6 if u["type"] == "Runner" else (1.0 if u["type"] == "King" else 0.8)
+                        damage_val = 18 if u["type"] == "Runner" else (30 if u["type"] == "King" else 20)
 
                         if e_dist < attack_range and can_see and in_front and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
