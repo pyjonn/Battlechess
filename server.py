@@ -18,7 +18,6 @@ UNIT_SCORES = {
     "Healer": 2,
     "Shieldman": 2,
     "Rook": 3,
-    "Queen": 4,
     "King": 5
 }
 
@@ -30,7 +29,6 @@ UNIT_WEIGHTS = {
     "King": 1.5,
     "Rook": 3,
     "Shieldman": 3.5,
-    "Queen": 2.5,
 }
 
 def setup_logging(verbose):
@@ -403,7 +401,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250, "Queen": 400}
+                    costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -547,7 +545,7 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250, "Queen": 400}
+            costs = {"Pawn": 100, "Knight": 150, "Bishop": 140, "Healer": 180, "Shieldman": 120, "Rook": 250}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
@@ -573,9 +571,9 @@ class Server:
 
                 shapes = {
                     "Pawn": "circle", "Rook": "square", "Knight": "pentagon",
-                    "Queen": "hexagon", "Bishop": "triangle", "Healer": "cross", "Shieldman": "square"
+                    "Bishop": "triangle", "Healer": "cross", "Shieldman": "square"
                 }
-                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Shieldman": 250, "Rook": 200, "Queen": 300}
+                max_hps = {"Pawn": 70, "Knight": 20, "Bishop": 75, "Healer": 90, "Shieldman": 250, "Rook": 200}
 
                 tile_pixel_size = 800.0 / self.board_size
                 radius_multipliers = {
@@ -585,13 +583,12 @@ class Server:
                     "Healer": 1.0,
                     "Shieldman": 1.2,
                     "Rook": 1.2,
-                    "Queen": 1.3
                 }
                 four_block_radius = (int(2.0 * tile_pixel_size) / 2) * radius_multipliers.get(utype, 1.0)
                 draw_radii = {
                     "Pawn": int(tile_pixel_size * 1.2), "Knight": int(tile_pixel_size * 1.4),
                     "Bishop": int(tile_pixel_size * 1.3), "Healer": int(tile_pixel_size * 1.3),
-                    "Shieldman": int(tile_pixel_size * 1.4), "Rook": int(tile_pixel_size * 1.3), "Queen": int(tile_pixel_size * 1.4)
+                    "Shieldman": int(tile_pixel_size * 1.4), "Rook": int(tile_pixel_size * 1.3)
                 }
 
                 self.units.append({

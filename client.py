@@ -63,7 +63,7 @@ if not FOOTSTEP_SOUNDS:
     FOOTSTEP_SOUNDS = [generate_noise(0.05, 0.15), generate_noise(0.05, 0.15)]
 
 MELEE_PITCHES = {
-    "Pawn": 1.2, "Bishop": 1.4, "Queen": 1.0, "King": 0.8, "Rook": 0.6, "Healer": 1.5, "Shieldman": 0.5
+    "Pawn": 1.2, "Bishop": 1.4, "King": 0.8, "Rook": 0.6, "Healer": 1.5, "Shieldman": 0.5
 }
 
 def play_pitched_melee(unit_type):
@@ -86,7 +86,6 @@ SHOP_ITEMS = [
     ("Healer", 180),
     ("Shieldman", 120),
     ("Rook", 250),
-    ("Queen", 400)
 ]
 
 WORLD_SIZE = 800.0
@@ -137,7 +136,7 @@ class ClientApp:
         self.selected_shop_item = None
 
         self.textures = {}
-        unit_types = ["Pawn", "Knight", "Bishop", "Healer", "Shieldman", "Rook", "Queen", "King"]
+        unit_types = ["Pawn", "Knight", "Bishop", "Healer", "Shieldman", "Rook", "King"]
         for u_type in unit_types:
             self.textures[u_type] = {
                 "base": self.load_texture(f"textures/{u_type}.png"),
@@ -583,7 +582,7 @@ class ClientApp:
 
                     target_unit_id = None
                     for u in self.units:
-                        u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Shieldman") else 2.0
+                        u_blocks = 2.4 if u["type"] in ( "Rook", "Shieldman") else 2.0
                         u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                         if math.hypot(u["x"] - wmx, u["y"] - wmy) < u_radius_world:
                             target_unit_id = u["id"]
@@ -613,7 +612,7 @@ class ClientApp:
                                 self.selected_units.clear()
                             for u in self.units:
                                 if u["owner"] == self.player_id:
-                                    u_blocks = 2.4 if u["type"] in ("Queen", "Rook", "Shieldman") else 2.0
+                                    u_blocks = 2.4 if u["type"] in ( "Rook", "Shieldman") else 2.0
                                     u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
@@ -834,7 +833,7 @@ class ClientApp:
             s_angle = self.to_screen_angle(u["angle"])
             color = self.get_player_color(u["owner"])
 
-            block_width = 2.4 if u["type"] in ("Queen", "Rook", "Shieldman") else 2.0
+            block_width = 2.4 if u["type"] in ( "Rook", "Shieldman") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
             draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
             collision_radius = draw_radius
