@@ -535,7 +535,8 @@ class ClientApp:
             mx, my = event.pos
 
             if event.button == 1:
-                if mx > 250 and my > 40 and self.selected_shop_item:
+                # Restrict buy clicks strictly to the visual board area
+                if 260 <= mx <= 760 and 40 <= my <= 540 and self.selected_shop_item:
                     wmx, wmy = self.to_world_coords(mx, my)
 
                     valid_side = True
@@ -560,7 +561,8 @@ class ClientApp:
                     self.send({"type": "READY_SHOP"})
 
             elif event.button == 3:
-                if mx > 250 and my > 40:
+                # Restrict sell clicks strictly to the visual board area
+                if 260 <= mx <= 760 and 40 <= my <= 540:
                     wmx, wmy = self.to_world_coords(mx, my)
                     for u in self.units:
                         if u["owner"] == self.player_id and u["type"] != "King":

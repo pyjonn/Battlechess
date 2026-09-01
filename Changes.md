@@ -1,7 +1,5 @@
 
 # Bugs
-
-Arrows in the air after round is done.
 Units can be placed underneath the buying board
 
 
