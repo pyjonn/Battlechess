@@ -170,12 +170,13 @@ class ClientApp:
             }
             return ffa_colors.get(owner, (255, 255, 255))
 
-    def is_tile_visible(self, wx, wy):
+    def is_tile_visible(self, wx, wy, my_units=None):
         if not self.fog_enabled or self.game_state == "SHOP":
             return True
-        my_units = [u for u in self.units if u["owner"] == self.player_id]
+        if my_units is None:
+            my_units = [u for u in self.units if u["owner"] == self.player_id]
         for u in my_units:
-            if math.hypot(wx - u["x"], wy - u["y"]) <= 200.0:
+            if (wx - u["x"])**2 + (wy - u["y"])**2 <= 40000.0:
                 return True
         return False
 
@@ -585,7 +586,7 @@ class ClientApp:
 
                     target_unit_id = None
                     for u in self.units:
-                        u_blocks = 2.4 if u["type"] in ( "Knight", "Shieldman") else 2.0
+                        u_blocks = 2.4 if u["type"] in ("Knight", "Shieldman") else 2.0
                         u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                         if math.hypot(u["x"] - wmx, u["y"] - wmy) < u_radius_world:
                             target_unit_id = u["id"]
@@ -615,7 +616,7 @@ class ClientApp:
                                 self.selected_units.clear()
                             for u in self.units:
                                 if u["owner"] == self.player_id:
-                                    u_blocks = 2.4 if u["type"] in ( "Knight", "Shieldman") else 2.0
+                                    u_blocks = 2.4 if u["type"] in ("Knight", "Shieldman") else 2.0
                                     u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
@@ -731,10 +732,18 @@ class ClientApp:
                 COLOR_DARK_GREEN  = (0, 100, 0)
                 COLOR_LIGHT_GREEN = (140, 230, 80)
 
+                my_units = [u for u in self.units if u["owner"] == self.player_id]
+
                 for r in range(self.board_size):
                     for c in range(self.board_size):
                         wx = c * ts_world + ts_world / 2.0
                         wy = r * ts_world + ts_world / 2.0
+
+                        sx, sy = self.to_screen_coords(wx, wy)
+                        margin = rect_size
+
+                        if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
+                            continue
 
                         if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
                             h = self.heightmap[r][c]
@@ -751,7 +760,7 @@ class ClientApp:
                         else:
                             color = COLOR_DARK_GREEN
 
-                        if not self.is_tile_visible(wx, wy):
+                        if not self.is_tile_visible(wx, wy, my_units):
                             color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
 
                         if self.game_state == "SHOP":
@@ -765,12 +774,6 @@ class ClientApp:
                                 gray = int(0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2])
                                 color = (int(gray * 0.4 + color[0] * 0.2), int(gray * 0.4 + color[1] * 0.2), int(gray * 0.4 + color[2] * 0.2))
 
-                        sx, sy = self.to_screen_coords(wx, wy)
-
-                        margin = rect_size
-                        if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
-                            continue
-
                         rect = pygame.Rect(0, 0, rect_size, rect_size)
                         rect.center = (int(sx), int(sy))
                         pygame.draw.rect(SCREEN, color, rect)
@@ -780,6 +783,7 @@ class ClientApp:
     def draw_units_and_projectiles(self):
         board_rect = pygame.Rect(260, 40, 500, 500)
         SCREEN.set_clip(board_rect)
+        my_units = [u for u in self.units if u["owner"] == self.player_id]
 
         for u in self.units:
             if u["owner"] == self.player_id and u.get("is_moving", False):
@@ -812,13 +816,13 @@ class ClientApp:
                     pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
 
         for p in self.particles:
-            if self.is_tile_visible(p["x"], p["y"]):
+            if self.is_tile_visible(p["x"], p["y"], my_units):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
                 pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
         for p in self.projectiles:
-            if self.is_tile_visible(p["x"], p["y"]):
+            if self.is_tile_visible(p["x"], p["y"], my_units):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 s_angle = self.to_screen_angle(p["angle"])
                 end_x = sx + int(10 * self.zoom * math.cos(s_angle))
@@ -829,14 +833,14 @@ class ClientApp:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
                 continue
 
-            if not self.is_tile_visible(u["x"], u["y"]):
+            if not self.is_tile_visible(u["x"], u["y"], my_units):
                 continue
 
             sx, sy = self.to_screen_coords(u["x"], u["y"])
             s_angle = self.to_screen_angle(u["angle"])
             color = self.get_player_color(u["owner"])
 
-            block_width = 2.4 if u["type"] in ( "Knight", "Shieldman") else 2.0
+            block_width = 2.4 if u["type"] in ("Knight", "Shieldman") else 2.0
             radius_world = (block_width / self.board_size) * WORLD_SIZE * 0.5
             draw_radius = int(radius_world * self.zoom * (500.0 / WORLD_SIZE))
             collision_radius = draw_radius
@@ -865,26 +869,48 @@ class ClientApp:
                 deg_angle = math.degrees(-s_angle) - 90
                 rotated_img = pygame.transform.rotate(scaled_img, deg_angle)
                 rect = rotated_img.get_rect(center=(int(sx), int(sy)))
-
-                ring_color = (255, 255, 255) if u.get("is_hit", False) else color
-                pygame.draw.circle(SCREEN, ring_color, (int(sx), int(sy)), draw_radius + 2, 2)
-
                 SCREEN.blit(rotated_img, rect.topleft)
             else:
-                shape = u["shape"]
                 draw_color = (255, 255, 255) if u.get("is_hit", False) else color
+                shape = u["shape"]
+
                 if shape == "circle":
                     pygame.draw.circle(SCREEN, draw_color, (int(sx), int(sy)), draw_radius)
                 elif shape == "square":
-                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - draw_radius, draw_radius * 2, draw_radius * 2))
+                    rect_obj = (int(sx) - draw_radius, int(sy) - draw_radius, draw_radius * 2, draw_radius * 2)
+                    pygame.draw.rect(SCREEN, draw_color, rect_obj)
                 elif shape == "cross":
                     th = max(2, int(draw_radius * 0.6))
-                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - th//2, int(sy) - draw_radius, th, draw_radius * 2))
-                    pygame.draw.rect(SCREEN, draw_color, (int(sx) - draw_radius, int(sy) - th//2, draw_radius * 2, th))
+                    rect1 = (int(sx) - th//2, int(sy) - draw_radius, th, draw_radius * 2)
+                    rect2 = (int(sx) - draw_radius, int(sy) - th//2, draw_radius * 2, th)
+                    pygame.draw.rect(SCREEN, draw_color, rect1)
+                    pygame.draw.rect(SCREEN, draw_color, rect2)
                 else:
                     sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
                     points = [(sx + draw_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + draw_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
                     pygame.draw.polygon(SCREEN, draw_color, points)
+
+            # Draw the Team-Colored Shape Outline Around the Unit
+            shape = u["shape"]
+            ring_color = (255, 255, 255) if u.get("is_hit", False) else color
+            outline_width = 2
+            out_radius = draw_radius + 2
+
+            if shape == "circle":
+                pygame.draw.circle(SCREEN, ring_color, (int(sx), int(sy)), out_radius, outline_width)
+            elif shape == "square":
+                rect_obj = (int(sx) - out_radius, int(sy) - out_radius, out_radius * 2, out_radius * 2)
+                pygame.draw.rect(SCREEN, ring_color, rect_obj, outline_width)
+            elif shape == "cross":
+                th = max(2, int(out_radius * 0.6))
+                rect1 = (int(sx) - th//2, int(sy) - out_radius, th, out_radius * 2)
+                rect2 = (int(sx) - out_radius, int(sy) - th//2, out_radius * 2, th)
+                pygame.draw.rect(SCREEN, ring_color, rect1, outline_width)
+                pygame.draw.rect(SCREEN, ring_color, rect2, outline_width)
+            else:
+                sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
+                points = [(sx + out_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + out_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
+                pygame.draw.polygon(SCREEN, ring_color, points, outline_width)
 
             hp_ratio = max(0, u["hp"] / u["max_hp"])
             bar_w = max(10, draw_radius * 2)
@@ -955,10 +981,14 @@ class ClientApp:
         pygame.draw.rect(SCREEN, (100, 100, 100), (mm_x, mm_y, mm_size, mm_size), 1)
 
         cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
+
+        my_units = [u for u in self.units if u["owner"] == self.player_id]
+
         for u in self.units:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
                 continue
-            if not self.is_tile_visible(u["x"], u["y"]):
+
+            if not self.is_tile_visible(u["x"], u["y"], my_units):
                 continue
 
             if self.player_id == 0:   rwx, rwy = cx - (u["x"] - cx), cy - (u["y"] - cy)

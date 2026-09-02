@@ -572,7 +572,7 @@ class Server:
 
                 shapes = {
                     "Peasant": "circle", "Knight": "square", "Archer": "pentagon",
-                    "Runner": "triangle", "Medic": "cross", "Shieldman": "square"
+                    "Runner": "triangle", "Medic": "cross", "Shieldman": "hexagon"
                 }
                 max_hps = {"Peasant": 70, "Archer": 20, "Runner": 75, "Medic": 90, "Shieldman": 250, "Knight": 200}
 

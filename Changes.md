@@ -1,6 +1,5 @@
 
 # Bugs
-Units can be placed underneath the buying board
 
 
 
