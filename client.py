@@ -819,7 +819,7 @@ class ClientApp:
             if self.is_tile_visible(p["x"], p["y"], my_units):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
-                pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
+                ##pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
         for p in self.projectiles:
             if self.is_tile_visible(p["x"], p["y"], my_units):
