@@ -536,7 +536,6 @@ class ClientApp:
             mx, my = event.pos
 
             if event.button == 1:
-                # Restrict buy clicks strictly to the visual board area
                 if 260 <= mx <= 760 and 40 <= my <= 540 and self.selected_shop_item:
                     wmx, wmy = self.to_world_coords(mx, my)
 
@@ -562,7 +561,6 @@ class ClientApp:
                     self.send({"type": "READY_SHOP"})
 
             elif event.button == 3:
-                # Restrict sell clicks strictly to the visual board area
                 if 260 <= mx <= 760 and 40 <= my <= 540:
                     wmx, wmy = self.to_world_coords(mx, my)
                     for u in self.units:
@@ -720,65 +718,88 @@ class ClientApp:
             return angle + rot
 
     def draw_board(self):
-                board_rect = pygame.Rect(260, 40, 500, 500)
-                SCREEN.set_clip(board_rect)
+        board_rect = pygame.Rect(260, 40, 500, 500)
+        SCREEN.set_clip(board_rect)
 
-                ts_world = WORLD_SIZE / float(self.board_size)
-                ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
-                rect_size = math.ceil(ts_screen) + 1
+        ts_world = WORLD_SIZE / float(self.board_size)
+        ts_screen = ts_world * self.zoom * (500.0 / WORLD_SIZE)
+        rect_size = math.ceil(ts_screen) + 1
 
-                COLOR_WHITE = (255, 255, 255)
-                COLOR_GREY  = (100, 105, 120)
-                COLOR_DARK_GREEN  = (0, 100, 0)
-                COLOR_LIGHT_GREEN = (140, 230, 80)
+        COLOR_WHITE = (255, 255, 255)
+        COLOR_GREY  = (100, 105, 120)
+        COLOR_DARK_GREEN  = (0, 100, 0)
+        COLOR_LIGHT_GREEN = (140, 230, 80)
 
-                my_units = [u for u in self.units if u["owner"] == self.player_id]
+        my_units = [u for u in self.units if u["owner"] == self.player_id]
 
-                for r in range(self.board_size):
-                    for c in range(self.board_size):
+        # PRECOMPUTED FOG GRID: Radically lowers CPU demand over standard loop
+        visible_grid = None
+        if self.fog_enabled and self.game_state != "SHOP":
+            visible_grid = [[False] * self.board_size for _ in range(self.board_size)]
+            tile_radius = int(200.0 / ts_world) + 1
+            for u in my_units:
+                uc, ur = int(u["x"] / ts_world), int(u["y"] / ts_world)
+                min_r, max_r = max(0, ur - tile_radius), min(self.board_size - 1, ur + tile_radius)
+                min_c, max_c = max(0, uc - tile_radius), min(self.board_size - 1, uc + tile_radius)
+                for r in range(min_r, max_r + 1):
+                    for c in range(min_c, max_c + 1):
                         wx = c * ts_world + ts_world / 2.0
                         wy = r * ts_world + ts_world / 2.0
+                        if (wx - u["x"])**2 + (wy - u["y"])**2 <= 40000.0:
+                            visible_grid[r][c] = True
 
-                        sx, sy = self.to_screen_coords(wx, wy)
-                        margin = rect_size
+        for r in range(self.board_size):
+            for c in range(self.board_size):
+                wx = c * ts_world + ts_world / 2.0
+                wy = r * ts_world + ts_world / 2.0
 
-                        if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
-                            continue
+                sx, sy = self.to_screen_coords(wx, wy)
+                margin = rect_size
 
-                        if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
-                            h = self.heightmap[r][c]
+                if sx < 260 - margin or sx > 760 + margin or sy < 40 - margin or sy > 540 + margin:
+                    continue
 
-                            if h <= self.water_level:
-                                color = (0, 120, 245)
-                            else:
-                                norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
-                                color = (
-                                    int(COLOR_DARK_GREEN[0] + norm_h * (COLOR_LIGHT_GREEN[0] - COLOR_DARK_GREEN[0])),
-                                    int(COLOR_DARK_GREEN[1] + norm_h * (COLOR_LIGHT_GREEN[1] - COLOR_DARK_GREEN[1])),
-                                    int(COLOR_DARK_GREEN[2] + norm_h * (COLOR_LIGHT_GREEN[2] - COLOR_DARK_GREEN[2]))
-                                )
-                        else:
-                            color = COLOR_DARK_GREEN
+                if self.heightmap and r < len(self.heightmap) and c < len(self.heightmap[r]):
+                    h = self.heightmap[r][c]
+                    if h <= self.water_level:
+                        color = (0, 120, 245)
+                    else:
+                        norm_h = max(0.0, min(1.0, (h - self.water_level) / (3.5 - self.water_level)))
+                        color = (
+                            int(COLOR_DARK_GREEN[0] + norm_h * (COLOR_LIGHT_GREEN[0] - COLOR_DARK_GREEN[0])),
+                            int(COLOR_DARK_GREEN[1] + norm_h * (COLOR_LIGHT_GREEN[1] - COLOR_DARK_GREEN[1])),
+                            int(COLOR_DARK_GREEN[2] + norm_h * (COLOR_LIGHT_GREEN[2] - COLOR_DARK_GREEN[2]))
+                        )
+                else:
+                    color = COLOR_DARK_GREEN
 
-                        if not self.is_tile_visible(wx, wy, my_units):
-                            color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
+                is_vis = True
+                if visible_grid is not None:
+                    is_vis = visible_grid[r][c]
+                elif not self.fog_enabled or self.game_state == "SHOP":
+                    is_vis = True
+                else:
+                    is_vis = self.is_tile_visible(wx, wy, my_units)
 
-                        if self.game_state == "SHOP":
-                            is_my_side = True
-                            if self.player_id == 0 and wy < 400: is_my_side = False
-                            elif self.player_id == 1 and wy > 400: is_my_side = False
-                            elif self.player_id == 2 and wx > 400: is_my_side = False
-                            elif self.player_id == 3 and wx < 400: is_my_side = False
+                if not is_vis:
+                    color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
 
-                            if not is_my_side:
-                                gray = int(0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2])
-                                color = (int(gray * 0.4 + color[0] * 0.2), int(gray * 0.4 + color[1] * 0.2), int(gray * 0.4 + color[2] * 0.2))
+                if self.game_state == "SHOP":
+                    is_my_side = True
+                    if self.player_id == 0 and wy < 400: is_my_side = False
+                    elif self.player_id == 1 and wy > 400: is_my_side = False
+                    elif self.player_id == 2 and wx > 400: is_my_side = False
+                    elif self.player_id == 3 and wx < 400: is_my_side = False
 
-                        rect = pygame.Rect(0, 0, rect_size, rect_size)
-                        rect.center = (int(sx), int(sy))
-                        pygame.draw.rect(SCREEN, color, rect)
+                    if not is_my_side:
+                        gray = int(0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2])
+                        color = (int(gray * 0.4 + color[0] * 0.2), int(gray * 0.4 + color[1] * 0.2), int(gray * 0.4 + color[2] * 0.2))
 
-                SCREEN.set_clip(None)
+                rect = pygame.Rect(0, 0, rect_size, rect_size)
+                rect.center = (int(sx), int(sy))
+                pygame.draw.rect(SCREEN, color, rect)
+
+        SCREEN.set_clip(None)
 
     def draw_units_and_projectiles(self):
         board_rect = pygame.Rect(260, 40, 500, 500)
@@ -819,7 +840,6 @@ class ClientApp:
             if self.is_tile_visible(p["x"], p["y"], my_units):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
-                ##pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
         for p in self.projectiles:
             if self.is_tile_visible(p["x"], p["y"], my_units):
@@ -903,10 +923,21 @@ class ClientApp:
                 pygame.draw.rect(SCREEN, ring_color, rect_obj, outline_width)
             elif shape == "cross":
                 th = max(2, int(out_radius * 0.6))
-                rect1 = (int(sx) - th//2, int(sy) - out_radius, th, out_radius * 2)
-                rect2 = (int(sx) - out_radius, int(sy) - th//2, out_radius * 2, th)
-                pygame.draw.rect(SCREEN, ring_color, rect1, outline_width)
-                pygame.draw.rect(SCREEN, ring_color, rect2, outline_width)
+                points = [
+                    (int(sx) - th//2, int(sy) - out_radius),
+                    (int(sx) + th//2, int(sy) - out_radius),
+                    (int(sx) + th//2, int(sy) - th//2),
+                    (int(sx) + out_radius, int(sy) - th//2),
+                    (int(sx) + out_radius, int(sy) + th//2),
+                    (int(sx) + th//2, int(sy) + th//2),
+                    (int(sx) + th//2, int(sy) + out_radius),
+                    (int(sx) - th//2, int(sy) + out_radius),
+                    (int(sx) - th//2, int(sy) + th//2),
+                    (int(sx) - out_radius, int(sy) + th//2),
+                    (int(sx) - out_radius, int(sy) - th//2),
+                    (int(sx) - th//2, int(sy) - th//2)
+                ]
+                pygame.draw.polygon(SCREEN, ring_color, points, outline_width)
             else:
                 sides = 3 if shape == "triangle" else (5 if shape == "pentagon" else (6 if shape == "hexagon" else (8 if shape == "octagon" else 4)))
                 points = [(sx + out_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + out_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
@@ -917,10 +948,13 @@ class ClientApp:
             pygame.draw.rect(SCREEN, (255, 0, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, bar_w, 3))
             pygame.draw.rect(SCREEN, (0, 255, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, int(bar_w * hp_ratio), 3))
 
+            # FIXED DIRECTION STICK: Now stems from outside edge
             stick_length = draw_radius * 1.5
+            start_x = sx + math.cos(s_angle) * draw_radius
+            start_y = sy + math.sin(s_angle) * draw_radius
             end_x = sx + math.cos(s_angle) * stick_length
             end_y = sy + math.sin(s_angle) * stick_length
-            pygame.draw.line(SCREEN, (0, 0, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
+            pygame.draw.line(SCREEN, (0, 0, 0), (int(start_x), int(start_y)), (int(end_x), int(end_y)), 2)
 
             if u["type"] == "King":
                 p_name = self.usernames.get(u["owner"], f"Player {u['owner'] + 1}")
