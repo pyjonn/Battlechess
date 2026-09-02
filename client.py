@@ -128,6 +128,7 @@ class ClientApp:
         self.last_bow_time = 0
         self.fog_enabled = False
         self.water_enabled = False
+        self.visible_grid = None
 
         self.zoom = 1.0
         self.camera_x = 0.0
@@ -170,14 +171,44 @@ class ClientApp:
             }
             return ffa_colors.get(owner, (255, 255, 255))
 
-    def is_tile_visible(self, wx, wy, my_units=None):
+    def update_fog_grid(self):
+        if not self.fog_enabled or self.game_state == "SHOP":
+            self.visible_grid = None
+            return
+
+        self.visible_grid = [[False] * self.board_size for _ in range(self.board_size)]
+        ts_world = WORLD_SIZE / float(self.board_size)
+        my_units = [u for u in self.units if u["owner"] == self.player_id]
+
+        for u in my_units:
+            if u["type"] in ("Archer", "Runner"):
+                view_range = u.get("radius", 20.0) * 18.0
+            else:
+                view_range = u.get("radius", 20.0) * 10.0
+
+            view_range_sq = view_range ** 2
+            tile_radius = int(view_range / ts_world) + 1
+
+            uc, ur = int(u["x"] / ts_world), int(u["y"] / ts_world)
+            min_r, max_r = max(0, ur - tile_radius), min(self.board_size - 1, ur + tile_radius)
+            min_c, max_c = max(0, uc - tile_radius), min(self.board_size - 1, uc + tile_radius)
+
+            for r in range(min_r, max_r + 1):
+                for c in range(min_c, max_c + 1):
+                    wx = c * ts_world + ts_world / 2.0
+                    wy = r * ts_world + ts_world / 2.0
+                    if (wx - u["x"])**2 + (wy - u["y"])**2 <= view_range_sq:
+                        self.visible_grid[r][c] = True
+
+    def is_tile_visible(self, wx, wy):
         if not self.fog_enabled or self.game_state == "SHOP":
             return True
-        if my_units is None:
-            my_units = [u for u in self.units if u["owner"] == self.player_id]
-        for u in my_units:
-            if (wx - u["x"])**2 + (wy - u["y"])**2 <= 40000.0:
-                return True
+        if self.visible_grid is not None:
+            ts_world = WORLD_SIZE / float(self.board_size)
+            c = int(wx / ts_world)
+            r = int(wy / ts_world)
+            if 0 <= r < self.board_size and 0 <= c < self.board_size:
+                return self.visible_grid[r][c]
         return False
 
     def update_default_zoom(self):
@@ -310,7 +341,7 @@ class ClientApp:
             self.game_state = "LOBBY"
             self.state = "CONNECTED"
             self.units = []
-            self.projectiles = []  # Clear projectiles on disconnect
+            self.projectiles = []
             self.chat_messages.append(f"System: Player {msg['disconnected_id'] + 1} disconnected. Returned to lobby.")
         elif mtype == "CHAT":
             self.chat_messages.append(f"{msg['sender']}: {msg['text']}")
@@ -416,7 +447,7 @@ class ClientApp:
             if "kills" in msg:
                 self.kills = {int(k): v for k, v in msg["kills"].items()}
             self.game_state = "LOBBY"
-            self.projectiles = []  # Clear projectiles when game ends
+            self.projectiles = []
             winner = msg['winner']
             if self.game_mode == "2v2":
                 self.chat_messages.append(f"System: Team {winner + 1} won!")
@@ -730,24 +761,6 @@ class ClientApp:
         COLOR_DARK_GREEN  = (0, 100, 0)
         COLOR_LIGHT_GREEN = (140, 230, 80)
 
-        my_units = [u for u in self.units if u["owner"] == self.player_id]
-
-        # PRECOMPUTED FOG GRID: Radically lowers CPU demand over standard loop
-        visible_grid = None
-        if self.fog_enabled and self.game_state != "SHOP":
-            visible_grid = [[False] * self.board_size for _ in range(self.board_size)]
-            tile_radius = int(200.0 / ts_world) + 1
-            for u in my_units:
-                uc, ur = int(u["x"] / ts_world), int(u["y"] / ts_world)
-                min_r, max_r = max(0, ur - tile_radius), min(self.board_size - 1, ur + tile_radius)
-                min_c, max_c = max(0, uc - tile_radius), min(self.board_size - 1, uc + tile_radius)
-                for r in range(min_r, max_r + 1):
-                    for c in range(min_c, max_c + 1):
-                        wx = c * ts_world + ts_world / 2.0
-                        wy = r * ts_world + ts_world / 2.0
-                        if (wx - u["x"])**2 + (wy - u["y"])**2 <= 40000.0:
-                            visible_grid[r][c] = True
-
         for r in range(self.board_size):
             for c in range(self.board_size):
                 wx = c * ts_world + ts_world / 2.0
@@ -773,13 +786,10 @@ class ClientApp:
                 else:
                     color = COLOR_DARK_GREEN
 
-                is_vis = True
-                if visible_grid is not None:
-                    is_vis = visible_grid[r][c]
-                elif not self.fog_enabled or self.game_state == "SHOP":
+                if not self.fog_enabled or self.game_state == "SHOP":
                     is_vis = True
                 else:
-                    is_vis = self.is_tile_visible(wx, wy, my_units)
+                    is_vis = self.is_tile_visible(wx, wy)
 
                 if not is_vis:
                     color = (int(color[0] * 0.2), int(color[1] * 0.2), int(color[2] * 0.2))
@@ -804,7 +814,6 @@ class ClientApp:
     def draw_units_and_projectiles(self):
         board_rect = pygame.Rect(260, 40, 500, 500)
         SCREEN.set_clip(board_rect)
-        my_units = [u for u in self.units if u["owner"] == self.player_id]
 
         for u in self.units:
             if u["owner"] == self.player_id and u.get("is_moving", False):
@@ -837,23 +846,26 @@ class ClientApp:
                     pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
 
         for p in self.particles:
-            if self.is_tile_visible(p["x"], p["y"], my_units):
+            if self.is_tile_visible(p["x"], p["y"]):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
 
         for p in self.projectiles:
-            if self.is_tile_visible(p["x"], p["y"], my_units):
+            if self.is_tile_visible(p["x"], p["y"]):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 s_angle = self.to_screen_angle(p["angle"])
-                end_x = sx + int(10 * self.zoom * math.cos(s_angle))
-                end_y = sy + int(10 * self.zoom * math.sin(s_angle))
-                pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), 2)
+                p_rad = p.get("radius", 10.0)
+                draw_len = p_rad * 1.5 * self.zoom * (500.0 / WORLD_SIZE)
+                end_x = sx + int(draw_len * math.cos(s_angle))
+                end_y = sy + int(draw_len * math.sin(s_angle))
+                thickness = max(1, int(p_rad * 0.25 * self.zoom * (500.0 / WORLD_SIZE)))
+                pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), thickness)
 
         for u in self.units:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
                 continue
 
-            if not self.is_tile_visible(u["x"], u["y"], my_units):
+            if not self.is_tile_visible(u["x"], u["y"]):
                 continue
 
             sx, sy = self.to_screen_coords(u["x"], u["y"])
@@ -910,7 +922,6 @@ class ClientApp:
                     points = [(sx + draw_radius * math.cos(s_angle + i * (2 * math.pi / sides)), sy + draw_radius * math.sin(s_angle + i * (2 * math.pi / sides))) for i in range(sides)]
                     pygame.draw.polygon(SCREEN, draw_color, points)
 
-            # Draw the Team-Colored Shape Outline Around the Unit
             shape = u["shape"]
             ring_color = (255, 255, 255) if u.get("is_hit", False) else color
             outline_width = 2
@@ -948,7 +959,6 @@ class ClientApp:
             pygame.draw.rect(SCREEN, (255, 0, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, bar_w, 3))
             pygame.draw.rect(SCREEN, (0, 255, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, int(bar_w * hp_ratio), 3))
 
-            # FIXED DIRECTION STICK: Now stems from outside edge
             stick_length = draw_radius * 1.5
             start_x = sx + math.cos(s_angle) * draw_radius
             start_y = sy + math.sin(s_angle) * draw_radius
@@ -1016,13 +1026,11 @@ class ClientApp:
 
         cx, cy = WORLD_SIZE / 2, WORLD_SIZE / 2
 
-        my_units = [u for u in self.units if u["owner"] == self.player_id]
-
         for u in self.units:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
                 continue
 
-            if not self.is_tile_visible(u["x"], u["y"], my_units):
+            if not self.is_tile_visible(u["x"], u["y"]):
                 continue
 
             if self.player_id == 0:   rwx, rwy = cx - (u["x"] - cx), cy - (u["y"] - cy)
@@ -1081,6 +1089,7 @@ class ClientApp:
         SCREEN.blit(text_surf, (50, 548))
 
     def draw_shop(self):
+        self.update_fog_grid()
         self.draw_sidebar()
         self.draw_board()
         self.draw_units_and_projectiles()
@@ -1113,6 +1122,8 @@ class ClientApp:
 
         pname = self.usernames.get(self.player_id, f"Player {self.player_id + 1}")
         SCREEN.blit(FONT.render(f"Playing as: {pname} | Zoom: {self.zoom:.2f}x (Scroll/+/-)", True, (255, 255, 255)), (265, 12))
+
+        self.update_fog_grid()
 
         self.draw_board()
         self.draw_units_and_projectiles()

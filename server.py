@@ -214,7 +214,10 @@ def get_height_modifier(current_pos, next_pos, heightmap, board_size):
     return h_next - h_curr
 
 def has_cone_vision(viewer, target_x, target_y):
-    max_range = viewer["radius"] * 10.0
+    if viewer["type"] in ("Archer", "Runner"):
+        max_range = viewer["radius"] * 28.0
+    else:
+        max_range = viewer["radius"] * 12.0
     dx = target_x - viewer["x"]
     dy = target_y - viewer["y"]
     dist = math.hypot(dx, dy)
@@ -655,11 +658,14 @@ class Server:
                 group_min_speed = min(get_unit_base_speed(u["type"]) for u in selected_group) if len(selected_group) > 1 else None
 
                 for u in selected_group:
-                    offset_x = u["x"] - center_x
-                    offset_y = u["y"] - center_y
-
-                    bounded_tx = max(u["radius"], min(800.0 - u["radius"], tx + offset_x))
-                    bounded_ty = max(u["radius"], min(800.0 - u["radius"], ty + offset_y))
+                    if t_unit is not None:
+                        bounded_tx = tx
+                        bounded_ty = ty
+                    else:
+                        offset_x = u["x"] - center_x
+                        offset_y = u["y"] - center_y
+                        bounded_tx = max(u["radius"], min(800.0 - u["radius"], tx + offset_x))
+                        bounded_ty = max(u["radius"], min(800.0 - u["radius"], ty + offset_y))
 
                     wp = (bounded_tx, bounded_ty, t_unit)
 
@@ -785,16 +791,18 @@ class Server:
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
 
                         if target:
-                            guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                            max_leash = u["radius"] * 30.0 if u["type"] == "Archer" else u["radius"] * 7.0
-                            if guard_dist > max_leash:
-                                target = None
-                                u["target_unit"] = None
+                            explicit_target = u.get("waypoints") and len(u["waypoints"]) > 0 and u["waypoints"][0][2] == target["id"]
+                            if not explicit_target:
+                                guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
+                                max_leash = u["radius"] * 30.0 if u["type"] == "Archer" else u["radius"] * 7.0
+                                if guard_dist > max_leash:
+                                    target = None
+                                    u["target_unit"] = None
 
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = u["radius"] * 28.0 if u["type"] == "Archer" else u["radius"] * 6.0
-                        leash_range = u["radius"] * 30.0 if u["type"] == "Archer" else u["radius"] * 7.0
+                        scan_range = u["radius"] * 18.0 if u["type"] == "Archer" else u["radius"] * 6.0
+                        leash_range = u["radius"] * 20.0 if u["type"] == "Archer" else u["radius"] * 7.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
@@ -807,7 +815,6 @@ class Server:
                                 u["target_y"] = u.get("guard_y", u["y"])
 
                     if u["type"] == "Archer":
-                        # Archers hold position and do not move automatically toward targets
                         if not u.get("waypoints"):
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
@@ -878,8 +885,9 @@ class Server:
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Archer":
-                        archer_range = u["radius"] * 28.0
-                        projectile_life = max(1, int(archer_range / 11.0))
+                        archer_range = u["radius"] * 18.0
+                        projectile_speed = u["radius"] * 1.5
+                        projectile_life = max(1, int(archer_range / projectile_speed))
 
                         if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
                             u["last_attack"] = now
@@ -893,7 +901,8 @@ class Server:
 
                             self.projectiles.append({
                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
-                                "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life
+                                "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life,
+                                "radius": u["radius"]
                             })
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
                     elif u["type"] == "Medic":
@@ -927,8 +936,9 @@ class Server:
 
             alive_projectiles = []
             for p in self.projectiles:
-                p["x"] += math.cos(p["angle"]) * 11.0
-                p["y"] += math.sin(p["angle"]) * 11.0
+                p_speed = p.get("radius", 10.0) * 1.5
+                p["x"] += math.cos(p["angle"]) * p_speed
+                p["y"] += math.sin(p["angle"]) * p_speed
                 p["life"] -= 1
                 hit = False
 
@@ -978,7 +988,7 @@ class Server:
             if match_over:
                 self.award_win(match_winner)
                 self.state = "LOBBY"
-                self.projectiles = []  # Clear remaining arrows in the air when the round ends
+                self.projectiles = []
                 self.broadcast({
                     "type": "GAME_OVER",
                     "winner": match_winner,
