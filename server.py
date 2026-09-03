@@ -658,7 +658,18 @@ class Server:
                 group_min_speed = min(get_unit_base_speed(u["type"]) for u in selected_group) if len(selected_group) > 1 else None
 
                 for u in selected_group:
+                    valid_t_unit = None
+                    ignore_command = False
                     if t_unit is not None:
+                        t_obj = next((e for e in self.units if e["id"] == t_unit), None)
+                        if t_obj:
+                            if u["type"] == "Medic" and not self.is_enemy(u["owner"], t_obj["owner"]):
+                                valid_t_unit = t_unit
+                            elif u["type"] != "Medic" and self.is_enemy(u["owner"], t_obj["owner"]):
+                                valid_t_unit = t_unit
+                            # If neither is met, valid_t_unit remains None and ignores the unit target.
+
+                    if valid_t_unit is not None:
                         bounded_tx = tx
                         bounded_ty = ty
                     else:
@@ -667,7 +678,7 @@ class Server:
                         bounded_tx = max(u["radius"], min(800.0 - u["radius"], tx + offset_x))
                         bounded_ty = max(u["radius"], min(800.0 - u["radius"], ty + offset_y))
 
-                    wp = (bounded_tx, bounded_ty, t_unit)
+                    wp = (bounded_tx, bounded_ty, valid_t_unit)
 
                     if "waypoints" not in u:
                         u["waypoints"] = []
