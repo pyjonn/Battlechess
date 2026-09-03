@@ -24,9 +24,9 @@ UNIT_SCORES = {
 UNIT_WEIGHTS = {
     "Peasant": 1.0,
     "Archer": 0.8,
-    "Rider": 0.9,
+    "Rider": 3, # Increased from 0.9 to trample infantry
     "Medic": 0.8,
-    "King": 1.5,
+    "King": 5.5,
     "Knight": 3,
     "Shieldman": 3.5,
 }
@@ -841,6 +841,21 @@ class Server:
                     height_diff = get_height_modifier((u["x"], u["y"]), (look_ahead_x, look_ahead_y), self.heightmap, self.board_size)
 
                     speed_multiplier = max(0.4, min(1.8, 1.0 - (height_diff * 0.5)))
+
+                    if u["type"] == "Rider":
+                        # Severe penalty for uphill climbs
+                        speed_multiplier = max(0.1, min(1.8, 1.0 - (height_diff * 1.5)))
+                        if speed_multiplier < 0.6:
+                            u["momentum"] = 0.0 # Break the charge on steep hills
+
+                    speed *= speed_multiplier
+
+                    if water_depth > 0:
+                        if u["type"] == "Rider":
+                            speed *= max(0.05, 1.0 - (water_depth * 1.8)) # Horses bog down immediately
+                            u["momentum"] = 0.0
+                        else:
+                            speed *= max(0.15, 1.0 - (water_depth * 0.75))
                     speed *= speed_multiplier
 
                     if water_depth > 0:
@@ -925,6 +940,23 @@ class Server:
                             h_diff = target_h - attacker_h
 
                             damage_multiplier = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
+
+                            # Add speed-based scaling specifically for the Rider
+                            if u["type"] == "Rider":
+                                current_speed = math.hypot(u.get("vx", 0.0), u.get("vy", 0.0))
+                                # Massive damage for peak velocity; practically harmless if attacking from a standstill
+                                speed_factor = max(0.1, min(4.0, (current_speed * 1.8) * u.get("momentum", 1.0)))
+                                damage_val *= speed_factor
+                            # Increment momentum gradually for long, uninterrupted charges
+                                u["momentum"] = min(1.0, u.get("momentum", 0.0) + 0.015)
+                                # Sluggish start, rapidly accelerating when fully charged
+                                accel = 0.02 + (0.15 * u["momentum"])
+                                u["vx"] = u.get("vx", 0.0) * (1.0 - accel) + target_vx * accel
+                                u["vy"] = u.get("vy", 0.0) * (1.0 - accel) + target_vy * accel
+                            else:
+                                u["vx"] = u.get("vx", 0.0) * 0.7 + target_vx * 0.3
+                                u["vy"] = u.get("vy", 0.0) * 0.7 + target_vy * 0.3
+
                             final_damage = damage_val * damage_multiplier
                             target["hp"] -= final_damage
 
