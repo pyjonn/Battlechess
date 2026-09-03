@@ -799,6 +799,19 @@ class Server:
                                     target = None
                                     u["target_unit"] = None
 
+                            # Override explicit target if an immediate threat is in the way
+                            if target:
+                                enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
+                                scan_range = u["radius"] * 18.0 if u["type"] == "Archer" else u["radius"] * 6.0
+                                closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=scan_range)
+
+                                if closest_enemy and closest_enemy["id"] != target["id"]:
+                                    target = closest_enemy
+                                    u["target_unit"] = target["id"]
+
+                    if not target:
+                        enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
+
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                         scan_range = u["radius"] * 18.0 if u["type"] == "Archer" else u["radius"] * 6.0
@@ -821,8 +834,13 @@ class Server:
                             u["is_moving"] = False
 
                     elif target and u.get("target_unit"):
-                        u["target_x"] = target["x"]
-                        u["target_y"] = target["y"]
+                        # Check if the unit is currently following a manual move-only command
+                        is_move_order = u.get("waypoints") and len(u["waypoints"]) > 0 and u["waypoints"][0][2] is None
+
+                        # Only divert pathing to chase if they aren't retreating/repositioning
+                        if not is_move_order:
+                            u["target_x"] = target["x"]
+                            u["target_y"] = target["y"]
 
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]

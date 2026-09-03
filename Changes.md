@@ -2,8 +2,6 @@
 # Bugs
 
 no target own type
-Unit attack while running
-comand are more important than auto attack
 
 # Features
 
