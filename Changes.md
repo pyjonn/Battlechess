@@ -1,10 +1,11 @@
 
 # Bugs
 
-
+no target own type
+Unit attack while running
+comand are more important than auto attack
 
 # Features
 
-Change runner to rider
-Make shapes around the units.
+
 Double click a unit to get all of his type.

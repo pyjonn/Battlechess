@@ -972,12 +972,7 @@ class ClientApp:
             pygame.draw.rect(SCREEN, (255, 0, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, bar_w, 3))
             pygame.draw.rect(SCREEN, (0, 255, 0), (int(sx) - bar_w//2, int(sy) - draw_radius - 6, int(bar_w * hp_ratio), 3))
 
-            stick_length = draw_radius * 1.5
-            start_x = sx + math.cos(s_angle) * draw_radius
-            start_y = sy + math.sin(s_angle) * draw_radius
-            end_x = sx + math.cos(s_angle) * stick_length
-            end_y = sy + math.sin(s_angle) * stick_length
-            pygame.draw.line(SCREEN, (0, 0, 0), (int(start_x), int(start_y)), (int(end_x), int(end_y)), 2)
+
 
             if u["type"] == "King":
                 p_name = self.usernames.get(u["owner"], f"Player {u['owner'] + 1}")
