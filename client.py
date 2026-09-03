@@ -63,7 +63,7 @@ if not FOOTSTEP_SOUNDS:
     FOOTSTEP_SOUNDS = [generate_noise(0.05, 0.15), generate_noise(0.05, 0.15)]
 
 MELEE_PITCHES = {
-    "Peasant": 1.2, "Runner": 1.4, "King": 0.8, "Knight": 0.6, "Medic": 1.5, "Shieldman": 0.5
+    "Peasant": 1.2, "Rider": 1.4, "King": 0.8, "Knight": 0.6, "Medic": 1.5, "Shieldman": 0.5
 }
 
 def play_pitched_melee(unit_type):
@@ -82,7 +82,7 @@ FONT_CUSTOM = pygame.font.SysFont("Arial", 12, bold=True)
 SHOP_ITEMS = [
     ("Peasant", 100),
     ("Archer", 150),
-    ("Runner", 140),
+    ("Rider", 140),
     ("Medic", 180),
     ("Shieldman", 120),
     ("Knight", 250),
@@ -137,12 +137,20 @@ class ClientApp:
         self.selected_shop_item = None
 
         self.textures = {}
-        unit_types = ["Peasant", "Archer", "Runner", "Medic", "Shieldman", "Knight", "King"]
+        unit_types = ["Peasant", "Archer", "Rider", "Medic", "Shieldman", "Knight", "King"]
         for u_type in unit_types:
             self.textures[u_type] = {
                 "base": self.load_texture(f"textures/{u_type}.png"),
+                "anim1": self.load_texture(f"textures/{u_type}1.png"),
+                "anim2": self.load_texture(f"textures/{u_type}2.png")
+            }
+        else:
+            self.textures[u_type] = {
+                "base": self.load_texture(f"textures/{u_type}.png"),
                 "f": self.load_texture(f"textures/{u_type}f.png"),
-                "b": self.load_texture(f"textures/{u_type}b.png")
+                "b": self.load_texture(f"textures/{u_type}b.png"),
+                "1": self.load_texture(f"textures/{u_type}b.png"),
+                "2": self.load_texture(f"textures/{u_type}b.png")
             }
 
     def load_texture(self, path):
@@ -181,7 +189,7 @@ class ClientApp:
         my_units = [u for u in self.units if u["owner"] == self.player_id]
 
         for u in my_units:
-            if u["type"] in ("Archer", "Runner"):
+            if u["type"] in ("Archer", "Rider"):
                 view_range = u.get("radius", 20.0) * 18.0
             else:
                 view_range = u.get("radius", 20.0) * 10.0
@@ -886,15 +894,20 @@ class ClientApp:
 
             if unit_tex:
                 if u.get("is_moving", False):
-                    if (self.anim_tick // 15) % 2 == 0:
-                        current_img = unit_tex["f"]
-                    else:
-                        current_img = unit_tex["b"]
+                    # 4-step cycle: 0 -> 1 -> 2 -> 3
+                    anim_step = (self.anim_tick // 15) % 4
+                    if anim_step == 0:
+                        current_img = unit_tex.get("anim1")
+                    elif anim_step in (1, 3):
+                        current_img = unit_tex.get("base")
+                    elif anim_step == 2:
+                        current_img = unit_tex.get("anim2")
 
+                    # Fallback in case a specific animation frame is missing
                     if current_img is None:
-                        current_img = unit_tex["base"]
+                        current_img = unit_tex.get("base")
                 else:
-                    current_img = unit_tex["base"]
+                    current_img = unit_tex.get("base")
 
             if current_img:
                 scaled_img = pygame.transform.scale(current_img, (img_size, img_size))
@@ -903,7 +916,7 @@ class ClientApp:
                 rect = rotated_img.get_rect(center=(int(sx), int(sy)))
                 SCREEN.blit(rotated_img, rect.topleft)
             else:
-                draw_color = (255, 255, 255) if u.get("is_hit", False) else color
+                draw_color = (255, 255, 255, 128) if u.get("is_hit", False) else color
                 shape = u["shape"]
 
                 if shape == "circle":

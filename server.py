@@ -14,7 +14,7 @@ PORT = 5555
 UNIT_SCORES = {
     "Peasant": 1,
     "Archer": 2,
-    "Runner": 2,
+    "Rider": 2,
     "Medic": 2,
     "Shieldman": 2,
     "Knight": 3,
@@ -24,7 +24,7 @@ UNIT_SCORES = {
 UNIT_WEIGHTS = {
     "Peasant": 1.0,
     "Archer": 0.8,
-    "Runner": 0.9,
+    "Rider": 0.9,
     "Medic": 0.8,
     "King": 1.5,
     "Knight": 3,
@@ -214,7 +214,7 @@ def get_height_modifier(current_pos, next_pos, heightmap, board_size):
     return h_next - h_curr
 
 def has_cone_vision(viewer, target_x, target_y):
-    if viewer["type"] in ("Archer", "Runner"):
+    if viewer["type"] in ("Archer", "Rider"):
         max_range = viewer["radius"] * 28.0
     else:
         max_range = viewer["radius"] * 12.0
@@ -239,7 +239,7 @@ def lerp_angle(current, target, max_delta):
     return target
 
 def get_unit_base_speed(unit_type):
-    if unit_type == "Runner":
+    if unit_type == "Rider":
         return 3.2
     elif unit_type == "King":
         return 1.4
@@ -405,7 +405,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Peasant": 100, "Archer": 150, "Runner": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
+                    costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -549,7 +549,7 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Peasant": 100, "Archer": 150, "Runner": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
+            costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
@@ -575,15 +575,15 @@ class Server:
 
                 shapes = {
                     "Peasant": "circle", "Knight": "square", "Archer": "pentagon",
-                    "Runner": "triangle", "Medic": "cross", "Shieldman": "hexagon"
+                    "Rider": "triangle", "Medic": "cross", "Shieldman": "hexagon"
                 }
-                max_hps = {"Peasant": 70, "Archer": 20, "Runner": 75, "Medic": 90, "Shieldman": 250, "Knight": 200}
+                max_hps = {"Peasant": 70, "Archer": 20, "Rider": 75, "Medic": 90, "Shieldman": 250, "Knight": 200}
 
                 tile_pixel_size = 800.0 / self.board_size
                 radius_multipliers = {
                     "Peasant": 0.9,
                     "Archer": 1.0,
-                    "Runner": 1.1,
+                    "Rider": 1.1,
                     "Medic": 1.0,
                     "Shieldman": 1.2,
                     "Knight": 1.2,
@@ -591,7 +591,7 @@ class Server:
                 four_block_radius = (int(2.0 * tile_pixel_size) / 2) * radius_multipliers.get(utype, 1.0)
                 draw_radii = {
                     "Peasant": int(tile_pixel_size * 1.2), "Archer": int(tile_pixel_size * 1.4),
-                    "Runner": int(tile_pixel_size * 1.3), "Medic": int(tile_pixel_size * 1.3),
+                    "Rider": int(tile_pixel_size * 1.3), "Medic": int(tile_pixel_size * 1.3),
                     "Shieldman": int(tile_pixel_size * 1.4), "Knight": int(tile_pixel_size * 1.3)
                 }
 
@@ -914,8 +914,8 @@ class Server:
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Medic"})
                     elif u["type"] != "Shieldman":
                         attack_range = (u["radius"] + target["radius"]) * 1.25
-                        cooldown = 0.6 if u["type"] == "Runner" else (1.0 if u["type"] == "King" else 0.8)
-                        damage_val = 18 if u["type"] == "Runner" else (30 if u["type"] == "King" else 20)
+                        cooldown = 0.6 if u["type"] == "Rider" else (1.0 if u["type"] == "King" else 0.8)
+                        damage_val = 18 if u["type"] == "Rider" else (30 if u["type"] == "King" else 20)
 
                         if e_dist < attack_range and can_see and in_front and now - u["last_attack"] > cooldown:
                             u["last_attack"] = now
