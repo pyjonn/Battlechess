@@ -955,6 +955,7 @@ class Server:
                             dmg_mult = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
 
                             self.projectiles.append({
+                                "type": "Archer", # Added so the client parses the correct texture
                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
                                 "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life,
                                 "radius": u["radius"]
@@ -967,22 +968,26 @@ class Server:
                         catapult_range = u["radius"] * 35.0
                         splash_radius = u["radius"] * 2.5
 
-                        # Variables e_dist, can_see, and in_front are now safely defined
+                        # Lower multiplier makes the boulder slower
+                        projectile_speed = u["radius"] * 0.6
+
+                        # Extend lifespan so the slower boulder can still reach maximum range
+                        projectile_life = max(1, int(catapult_range / projectile_speed))
+
                         if not u["is_moving"] and e_dist < catapult_range and can_see and in_front and now - u["last_attack"] > 3.5:
                             u["last_attack"] = now
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
 
-                            for enemy in self.units:
-                                if self.is_enemy(enemy["owner"], u["owner"]) and enemy["hp"] > 0:
-                                    dist_to_impact = math.hypot(enemy["x"] - target["x"], enemy["y"] - target["y"])
-                                    if dist_to_impact <= splash_radius:
-                                        enemy["hp"] -= 45
-                                        enemy["is_hit"] = True
-
                             self.projectiles.append({
-                                "x": u["x"], "y": u["y"], "angle": base_ang,
-                                "owner": u["owner"], "damage": 0, "life": int(catapult_range / (u["radius"] * 1.2)),
-                                "radius": u["radius"] * 1.0
+                                "type": "Catapult",
+                                "x": u["x"],
+                                "y": u["y"],
+                                "angle": base_ang,
+                                "owner": u["owner"],
+                                "damage": 60,
+                                "life": projectile_life,
+                                "radius": splash_radius,
+                                "speed": projectile_speed # The movement loop will use this to update positioning
                             })
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
 

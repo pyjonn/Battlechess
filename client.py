@@ -141,6 +141,11 @@ class ClientApp:
 
         self.textures = {}
         unit_types = ["Peasant", "Archer", "Rider", "Medic", "Shieldman", "Knight", "King", "Catapult"]
+
+        self.projectile_textures = {
+                    "Archer": self.load_texture("textures/Archer_proj.png"),
+                    "Catapult": self.load_texture("textures/Catapult_proj.png")
+                }
         for u_type in unit_types:
             self.textures[u_type] = {
                 "base": self.load_texture(f"textures/{u_type}.png"),
@@ -192,7 +197,7 @@ class ClientApp:
         my_units = [u for u in self.units if u["owner"] == self.player_id]
 
         for u in my_units:
-            if u["type"] in ("Archer", "Rider" "Catapult"):
+            if u["type"] in ("Archer", "Rider", "Catapult"):  # Added missing comma
                 view_range = u.get("radius", 20.0) * 18.0
             else:
                 view_range = u.get("radius", 20.0) * 10.0
@@ -886,18 +891,30 @@ class ClientApp:
             if self.is_tile_visible(p["x"], p["y"]):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
                 radius = max(1, int(6 * (p["life"] / p["max_life"]) * self.zoom))
+                pygame.draw.circle(SCREEN, p["color"], (int(sx), int(sy)), radius)
 
         for p in self.projectiles:
             if self.is_tile_visible(p["x"], p["y"]):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])
-                s_angle = self.to_screen_angle(p["angle"])
-                p_rad = p.get("radius", 10.0)
-                draw_len = p_rad * 1.5 * self.zoom * (500.0 / WORLD_SIZE)
-                end_x = sx + int(draw_len * math.cos(s_angle))
-                end_y = sy + int(draw_len * math.sin(s_angle))
-                thickness = max(1, int(p_rad * 0.25 * self.zoom * (500.0 / WORLD_SIZE)))
-                pygame.draw.line(SCREEN, (255, 220, 0), (int(sx), int(sy)), (int(end_x), int(end_y)), thickness)
+                p_type = p.get("type") or p.get("unit_type", "Catapult")
+                p_tex = self.projectile_textures.get(p_type)
 
+                if p_tex:
+                    proj_size = max(8, int(12 * self.zoom))
+                    scaled_proj = pygame.transform.scale(p_tex, (proj_size, proj_size))
+                    angle = p.get("angle", 0.0)
+                    s_angle = self.to_screen_angle(angle)
+                    rotated_proj = pygame.transform.rotate(scaled_proj, math.degrees(-s_angle) - 90)
+                    rect = rotated_proj.get_rect(center=(int(sx), int(sy)))
+                    SCREEN.blit(rotated_proj, rect.topleft)
+                else:
+                    if p_type == "Catapult":
+                        # Distinct boulder fallback if texture isn't loaded
+                        boulder_radius = max(4, int(6 * self.zoom))
+                        pygame.draw.circle(SCREEN, (120, 120, 120), (int(sx), int(sy)), boulder_radius)
+                        pygame.draw.circle(SCREEN, (60, 60, 60), (int(sx), int(sy)), boulder_radius, 1)
+                    else:
+                        pygame.draw.circle(SCREEN, (255, 255, 200), (int(sx), int(sy)), max(2, int(3 * self.zoom)))
         for u in self.units:
             if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
                 continue
