@@ -577,7 +577,7 @@ class Server:
                     "Peasant": "circle", "Knight": "square", "Archer": "pentagon", "Catapult": "square",
                     "Rider": "triangle", "Medic": "cross", "Shieldman": "hexagon"
                 }
-                max_hps = {"Peasant": 70, "Archer": 20, "Rider": 75, "Medic": 90, "Shieldman": 250, "Knight": 200, "Catapult": 120}
+                max_hps = {"Peasant": 70, "Archer": 20, "Rider": 75, "Medic": 90, "Shieldman": 250, "Knight": 200, "Catapult": 30}
 
                 tile_pixel_size = 800.0 / self.board_size
                 radius_multipliers = {

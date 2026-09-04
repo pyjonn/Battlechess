@@ -140,7 +140,7 @@ class ClientApp:
         self.selected_shop_item = None
 
         self.textures = {}
-        unit_types = ["Peasant", "Archer", "Rider", "Medic", "Shieldman", "Knight", "King"]
+        unit_types = ["Peasant", "Archer", "Rider", "Medic", "Shieldman", "Knight", "King", "Catapult"]
         for u_type in unit_types:
             self.textures[u_type] = {
                 "base": self.load_texture(f"textures/{u_type}.png"),
@@ -939,7 +939,10 @@ class ClientApp:
                     current_img = unit_tex.get("base")
 
             if current_img:
-                scaled_img = pygame.transform.scale(current_img, (img_size, img_size))
+                if u["type"] == ("Catapult"):
+                    scaled_img = pygame.transform.scale(current_img, (img_size * 1.5, img_size * 1.5))
+                else:
+                    scaled_img = pygame.transform.scale(current_img, (img_size, img_size))
                 deg_angle = math.degrees(-s_angle) - 90
                 rotated_img = pygame.transform.rotate(scaled_img, deg_angle)
                 rect = rotated_img.get_rect(center=(int(sx), int(sy)))
