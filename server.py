@@ -18,7 +18,8 @@ UNIT_SCORES = {
     "Medic": 2,
     "Shieldman": 2,
     "Knight": 3,
-    "King": 5
+    "King": 5,
+    "Catapult": 3
 }
 
 UNIT_WEIGHTS = {
@@ -29,6 +30,7 @@ UNIT_WEIGHTS = {
     "King": 5.5,
     "Knight": 3,
     "Shieldman": 3.5,
+    "Catapult": 3,
 }
 
 def setup_logging(verbose):
@@ -405,7 +407,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
+                    costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -941,7 +943,7 @@ class Server:
 
                     if u["type"] == "Archer":
                         archer_range = u["radius"] * 18.0
-                        projectile_speed = u["radius"] * 1.5
+                        projectile_speed = u["radius"] * 0.05
                         projectile_life = max(1, int(archer_range / projectile_speed))
 
                         if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
@@ -958,7 +960,7 @@ class Server:
                                 "type": "Archer", # Added so the client parses the correct texture
                                 "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
                                 "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life,
-                                "radius": u["radius"]
+                                "radius": u["radius"], "speed": projectile_speed
                             })
 
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
@@ -968,15 +970,16 @@ class Server:
                         catapult_range = u["radius"] * 35.0
                         splash_radius = u["radius"] * 2.5
 
-                        # Lower multiplier makes the boulder slower
-                        projectile_speed = u["radius"] * 0.6
+                        # Reduced projectile speed (lowered from 0.0015 to 0.0006)
+                        projectile_speed = u["radius"] * 0.03
 
-                        # Extend lifespan so the slower boulder can still reach maximum range
+                        # Extend lifespan so the slower boulder can reach maximum range
                         projectile_life = max(1, int(catapult_range / projectile_speed))
 
-                        if not u["is_moving"] and e_dist < catapult_range and can_see and in_front and now - u["last_attack"] > 3.5:
+                        if not u["is_moving"] and e_dist < catapult_range and can_see and in_front and now - u["last_attack"] > 3.0:
                             u["last_attack"] = now
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
+                            u["angle"] = base_ang
 
                             self.projectiles.append({
                                 "type": "Catapult",
@@ -985,11 +988,13 @@ class Server:
                                 "angle": base_ang,
                                 "owner": u["owner"],
                                 "damage": 60,
+                                "speed": projectile_speed,
                                 "life": projectile_life,
-                                "radius": splash_radius,
-                                "speed": projectile_speed # The movement loop will use this to update positioning
+                                "max_life": projectile_life,
+                                "splash_radius": splash_radius,
+                                "radius": u["radius"]
                             })
-                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
+                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Catapult"})
 
                     elif u["type"] == "Medic":
                         heal_range = (u["radius"] + target["radius"]) * 1.2
@@ -1039,7 +1044,7 @@ class Server:
 
             alive_projectiles = []
             for p in self.projectiles:
-                p_speed = p.get("radius", 10.0) * 1.5
+                p_speed = p.get("radius", 10.0) * (p.get("speed") or 5.0) * 0.5  # Scaled down to reduce projectile speed
                 p["x"] += math.cos(p["angle"]) * p_speed
                 p["y"] += math.sin(p["angle"]) * p_speed
                 p["life"] -= 1
