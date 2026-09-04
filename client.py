@@ -914,7 +914,7 @@ class ClientApp:
             collision_radius = draw_radius
 
             if u["id"] in self.selected_units:
-                pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 2, 1)
+                pygame.draw.circle(SCREEN, (255, 255, 255), (int(sx), int(sy)), collision_radius + 4, 1)
 
             img_size = draw_radius * 2
             unit_tex = self.textures.get(u["type"])
