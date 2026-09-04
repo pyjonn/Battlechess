@@ -797,6 +797,14 @@ class Server:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
+                    # --- ADD THIS BLOCK TO FIX MEDIC PATHING ---
+                    if target and u.get("target_unit"):
+                        is_move_order = u.get("waypoints") and len(u["waypoints"]) > 0 and u["waypoints"][0][2] is None
+                        if not is_move_order:
+                            u["target_x"] = target["x"]
+                            u["target_y"] = target["y"]
+                    # -------------------------------------------
+
                 elif u["type"] != "Shieldman":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
@@ -823,7 +831,8 @@ class Server:
                     if not target:
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
 
-                    if not target:
+                    # Replace the duplicated blocks with this:
+                    if not target and u["type"] != "Medic":
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
                         scan_range = u["radius"] * 18.0 if u["type"] == "Archer" else u["radius"] * 6.0
                         leash_range = u["radius"] * 20.0 if u["type"] == "Archer" else u["radius"] * 7.0

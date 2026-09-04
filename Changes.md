@@ -1,7 +1,6 @@
 
 # Bugs
 
-no target own type
 
 # Features
 
