@@ -85,6 +85,7 @@ SHOP_ITEMS = [
     ("Rider", 140),
     ("Medic", 180),
     ("Shieldman", 120),
+    ("Catapult", 300),
     ("Knight", 250),
 ]
 
@@ -191,7 +192,7 @@ class ClientApp:
         my_units = [u for u in self.units if u["owner"] == self.player_id]
 
         for u in my_units:
-            if u["type"] in ("Archer", "Rider"):
+            if u["type"] in ("Archer", "Rider" "Catapult"):
                 view_range = u.get("radius", 20.0) * 18.0
             else:
                 view_range = u.get("radius", 20.0) * 10.0

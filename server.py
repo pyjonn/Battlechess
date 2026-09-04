@@ -214,7 +214,7 @@ def get_height_modifier(current_pos, next_pos, heightmap, board_size):
     return h_next - h_curr
 
 def has_cone_vision(viewer, target_x, target_y):
-    if viewer["type"] in ("Archer", "Rider"):
+    if viewer["type"] in ("Archer", "Rider", "Catapult"):
         max_range = viewer["radius"] * 28.0
     else:
         max_range = viewer["radius"] * 12.0
@@ -549,7 +549,7 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250}
+            costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
@@ -574,10 +574,10 @@ class Server:
                 self.gold[pid] -= cost
 
                 shapes = {
-                    "Peasant": "circle", "Knight": "square", "Archer": "pentagon",
+                    "Peasant": "circle", "Knight": "square", "Archer": "pentagon", "Catapult": "square",
                     "Rider": "triangle", "Medic": "cross", "Shieldman": "hexagon"
                 }
-                max_hps = {"Peasant": 70, "Archer": 20, "Rider": 75, "Medic": 90, "Shieldman": 250, "Knight": 200}
+                max_hps = {"Peasant": 70, "Archer": 20, "Rider": 75, "Medic": 90, "Shieldman": 250, "Knight": 200, "Catapult": 120}
 
                 tile_pixel_size = 800.0 / self.board_size
                 radius_multipliers = {
@@ -587,12 +587,14 @@ class Server:
                     "Medic": 1.0,
                     "Shieldman": 1.2,
                     "Knight": 1.2,
+                    "Catapult": 1.4
                 }
                 four_block_radius = (int(2.0 * tile_pixel_size) / 2) * radius_multipliers.get(utype, 1.0)
                 draw_radii = {
                     "Peasant": int(tile_pixel_size * 1.2), "Archer": int(tile_pixel_size * 1.4),
                     "Rider": int(tile_pixel_size * 1.3), "Medic": int(tile_pixel_size * 1.3),
-                    "Shieldman": int(tile_pixel_size * 1.4), "Knight": int(tile_pixel_size * 1.3)
+                    "Shieldman": int(tile_pixel_size * 1.4), "Knight": int(tile_pixel_size * 1.3),
+                    "Catapult": int(tile_pixel_size * 1.5)
                 }
 
                 self.units.append({
@@ -805,6 +807,7 @@ class Server:
                             u["target_y"] = target["y"]
                     # -------------------------------------------
 
+
                 elif u["type"] != "Shieldman":
                     if u.get("target_unit"):
                         target = next((e for e in self.units if e["id"] == u["target_unit"] and self.is_enemy(e["owner"], u["owner"])), None)
@@ -813,7 +816,7 @@ class Server:
                             explicit_target = u.get("waypoints") and len(u["waypoints"]) > 0 and u["waypoints"][0][2] == target["id"]
                             if not explicit_target:
                                 guard_dist = math.hypot(target["x"] - u.get("guard_x", u["x"]), target["y"] - u.get("guard_y", u["y"]))
-                                max_leash = u["radius"] * 30.0 if u["type"] == "Archer" else u["radius"] * 7.0
+                                max_leash = u["radius"] * 30.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 7.0
                                 if guard_dist > max_leash:
                                     target = None
                                     u["target_unit"] = None
@@ -834,8 +837,8 @@ class Server:
                     # Replace the duplicated blocks with this:
                     if not target and u["type"] != "Medic":
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = u["radius"] * 18.0 if u["type"] == "Archer" else u["radius"] * 6.0
-                        leash_range = u["radius"] * 20.0 if u["type"] == "Archer" else u["radius"] * 7.0
+                        scan_range = u["radius"] * 18.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 6.0
+                        leash_range = u["radius"] * 20.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 7.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:
@@ -847,7 +850,7 @@ class Server:
                                 u["target_x"] = u.get("guard_x", u["x"])
                                 u["target_y"] = u.get("guard_y", u["y"])
 
-                    if u["type"] == "Archer":
+                    if u["type"] in ("Archer", "Catapult"):
                         if not u.get("waypoints"):
                             u["target_x"] = u["x"]
                             u["target_y"] = u["y"]
@@ -934,7 +937,6 @@ class Server:
                     u["angle"] = lerp_angle(u["angle"], desired_angle, 0.25 if not u["is_moving"] else 0.15)
                     e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                     can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
-
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
                     if u["type"] == "Archer":
@@ -957,7 +959,33 @@ class Server:
                                 "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life,
                                 "radius": u["radius"]
                             })
+
                             self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
+
+
+                    elif u["type"] == "Catapult":
+                        catapult_range = u["radius"] * 35.0
+                        splash_radius = u["radius"] * 2.5
+
+                        # Variables e_dist, can_see, and in_front are now safely defined
+                        if not u["is_moving"] and e_dist < catapult_range and can_see and in_front and now - u["last_attack"] > 3.5:
+                            u["last_attack"] = now
+                            base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
+
+                            for enemy in self.units:
+                                if self.is_enemy(enemy["owner"], u["owner"]) and enemy["hp"] > 0:
+                                    dist_to_impact = math.hypot(enemy["x"] - target["x"], enemy["y"] - target["y"])
+                                    if dist_to_impact <= splash_radius:
+                                        enemy["hp"] -= 45
+                                        enemy["is_hit"] = True
+
+                            self.projectiles.append({
+                                "x": u["x"], "y": u["y"], "angle": base_ang,
+                                "owner": u["owner"], "damage": 0, "life": int(catapult_range / (u["radius"] * 1.2)),
+                                "radius": u["radius"] * 1.0
+                            })
+                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
+
                     elif u["type"] == "Medic":
                         heal_range = (u["radius"] + target["radius"]) * 1.2
                         if e_dist < heal_range and in_front and now - u["last_attack"] > 0.8:
