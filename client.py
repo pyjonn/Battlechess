@@ -92,6 +92,8 @@ WORLD_SIZE = 800.0
 
 class ClientApp:
     def __init__(self):
+        self.last_click_time = 0
+        self.last_clicked_unit_id = None
         self.state = "MENU"
         self.server_process = None
         self.sock = None
@@ -615,6 +617,32 @@ class ClientApp:
             if event.button == 1:
                 if smx > 250 and smy > 40:
                     self.drag_start = (smx, smy)
+
+                    # Double-click unit type selection
+                    current_time = time.time()
+                    wmx, wmy = self.to_world_coords(smx, smy)
+                    clicked_unit = None
+
+                    for u in self.units:
+                        if u["owner"] == self.player_id:
+                            u_blocks = 2.4 if u["type"] in ("Knight", "Shieldman") else 2.0
+                            u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
+                            if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
+                                clicked_unit = u
+                                break
+
+                    if clicked_unit:
+                        if (current_time - self.last_click_time) < 0.3 and self.last_clicked_unit_id == clicked_unit["id"]:
+                            self.selected_units.clear()
+                            for u in self.units:
+                                if u["owner"] == self.player_id and u["type"] == clicked_unit["type"]:
+                                    self.selected_units.add(u["id"])
+
+                            # Add this line to prevent MOUSEBUTTONUP from clearing the selection
+                            self.drag_start = None
+
+                        self.last_click_time = current_time
+                        self.last_clicked_unit_id = clicked_unit["id"]
 
             elif event.button == 3:
                 if smx > 250 and smy > 40 and self.selected_units:
