@@ -870,7 +870,21 @@ class Server:
                 dx = u["target_x"] - u["x"]
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
+
                 if dist > 3:
+                    desired_angle = math.atan2(dy, dx)
+                    # Smoothly interpolate angle toward movement direction
+                    u["angle"] = lerp_angle(u["angle"], desired_angle, 0.2)
+
+                    # Restrict catapult movement until it points toward its waypoint
+                    if u["type"] == "Catapult":
+                        angle_diff = abs((desired_angle - u["angle"] + math.pi) % (2 * math.pi) - math.pi)
+                        if angle_diff > 0.15:
+                            u["is_moving"] = False
+                            u["vx"] = 0.0
+                            u["vy"] = 0.0
+                            continue
+
                     u["is_moving"] = True
                     tile_pixel_size = 800.0 / self.board_size
                     base_blocks_per_second = u.get("group_speed") if u.get("group_speed") is not None else get_unit_base_speed(u["type"])
@@ -884,21 +898,6 @@ class Server:
                     height_diff = get_height_modifier((u["x"], u["y"]), (look_ahead_x, look_ahead_y), self.heightmap, self.board_size)
 
                     speed_multiplier = max(0.4, min(1.8, 1.0 - (height_diff * 0.5)))
-
-                    if u["type"] == "Rider":
-                        # Severe penalty for uphill climbs
-                        speed_multiplier = max(0.1, min(1.8, 1.0 - (height_diff * 1.5)))
-                        if speed_multiplier < 0.6:
-                            u["momentum"] = 0.0 # Break the charge on steep hills
-
-                    speed *= speed_multiplier
-
-                    if water_depth > 0:
-                        if u["type"] == "Rider":
-                            speed *= max(0.05, 1.0 - (water_depth * 1.8)) # Horses bog down immediately
-                            u["momentum"] = 0.0
-                        else:
-                            speed *= max(0.15, 1.0 - (water_depth * 0.75))
                     speed *= speed_multiplier
 
                     if water_depth > 0:
@@ -914,12 +913,17 @@ class Server:
                     u["y"] += u["vy"]
 
                     if not target or not has_cone_vision(u, target["x"], target["y"]):
-                        desired_angle = math.atan2(dy, dx)
-                        u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
+                        if u["type"] != "Catapult":
+                            u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
                 else:
                     u["is_moving"] = False
                     u["vx"] = 0.0
                     u["vy"] = 0.0
+
+                    # Smoothly turn towards target enemy when stationary
+                    if target:
+                        desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
+                        u["angle"] = lerp_angle(u["angle"], desired_angle, 0.02)
 
                     if u.get("waypoints"):
                         current_wp = u["waypoints"][0]
@@ -934,9 +938,9 @@ class Server:
                             else:
                                 u["group_speed"] = None
 
-                if target:
+                if target and not u["is_moving"]:
                     desired_angle = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                    u["angle"] = lerp_angle(u["angle"], desired_angle, 0.25 if not u["is_moving"] else 0.15)
+                    u["angle"] = lerp_angle(u["angle"], desired_angle, 0.15)
                     e_dist = math.hypot(target["x"] - u["x"], target["y"] - u["y"])
                     can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
                     in_front = is_in_front_arc(u, target["x"], target["y"])
@@ -947,54 +951,49 @@ class Server:
                         projectile_life = max(1, int(archer_range / projectile_speed))
 
                         if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
-                            u["last_attack"] = now
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                            u["angle"] = base_ang
+                            # Smoothly rotate toward the target before or during the shot
+                            u["angle"] = lerp_angle(u["angle"], base_ang, 0.1)
 
-                            target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
-                            attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
-                            h_diff = target_h - attacker_h
-                            dmg_mult = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
+                            # Only fire once the unit is facing closely enough to the target
+                            if abs((base_ang - u["angle"] + math.pi) % (2 * math.pi) - math.pi) < 0.2:
+                                u["last_attack"] = now
+                                target_h = get_height_at_pos(target["x"], target["y"], self.heightmap, self.board_size)
+                                attacker_h = get_height_at_pos(u["x"], u["y"], self.heightmap, self.board_size)
+                                h_diff = target_h - attacker_h
+                                dmg_mult = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
 
-                            self.projectiles.append({
-                                "type": "Archer", # Added so the client parses the correct texture
-                                "x": u["x"], "y": u["y"], "angle": base_ang + random.uniform(-0.1, 0.1),
-                                "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life,
-                                "radius": u["radius"], "speed": projectile_speed
-                            })
-
-                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
+                                self.projectiles.append({
+                                    "type": "Archer",
+                                    "x": u["x"], "y": u["y"], "angle": u["angle"] + random.uniform(-0.1, 0.1),
+                                    "owner": u["owner"], "damage": 25 * dmg_mult, "life": projectile_life,
+                                    "radius": u["radius"], "speed": projectile_speed
+                                })
+                                self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Archer"})
 
 
                     elif u["type"] == "Catapult":
                         catapult_range = u["radius"] * 35.0
-                        splash_radius = u["radius"] * 2.5
-
-                        # Reduced projectile speed (lowered from 0.0015 to 0.0006)
+                        splash_radius = u["radius"] * 4.5
                         projectile_speed = u["radius"] * 0.03
-
-                        # Extend lifespan so the slower boulder can reach maximum range
                         projectile_life = max(1, int(catapult_range / projectile_speed))
 
-                        if not u["is_moving"] and e_dist < catapult_range and can_see and in_front and now - u["last_attack"] > 3.0:
-                            u["last_attack"] = now
+                        if not u["is_moving"] and e_dist < catapult_range and can_see and in_front:
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
-                            u["angle"] = base_ang
+                            u["angle"] = lerp_angle(u["angle"], base_ang, 0.08)
 
-                            self.projectiles.append({
-                                "type": "Catapult",
-                                "x": u["x"],
-                                "y": u["y"],
-                                "angle": base_ang,
-                                "owner": u["owner"],
-                                "damage": 60,
-                                "speed": projectile_speed,
-                                "life": projectile_life,
-                                "max_life": projectile_life,
-                                "splash_radius": splash_radius,
-                                "radius": u["radius"]
-                            })
-                            self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Catapult"})
+                            # Fire only when aligned
+                            if abs((base_ang - u["angle"] + math.pi) % (2 * math.pi) - math.pi) < 0.15 and now - u["last_attack"] > 2.0:
+                                u["last_attack"] = now
+                                self.projectiles.append({
+                                    "type": "Catapult",
+                                    "x": u["x"], "y": u["y"], "angle": u["angle"],
+                                    "target_x": target["x"], "target_y": target["y"],
+                                    "owner": u["owner"], "damage": 40, "life": projectile_life,
+                                    "radius": u["radius"], "speed": projectile_speed,
+                                    "splash_radius": splash_radius
+                                })
+                                self.broadcast({"type": "ATTACK_SOUND", "unit_type": "Catapult"})
 
                     elif u["type"] == "Medic":
                         heal_range = (u["radius"] + target["radius"]) * 1.2

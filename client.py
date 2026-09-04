@@ -147,19 +147,12 @@ class ClientApp:
                     "Catapult": self.load_texture("textures/Catapult_proj.png")
                 }
         for u_type in unit_types:
-            self.textures[u_type] = {
-                "base": self.load_texture(f"textures/{u_type}.png"),
-                "anim1": self.load_texture(f"textures/{u_type}1.png"),
-                "anim2": self.load_texture(f"textures/{u_type}2.png")
-            }
-        else:
-            self.textures[u_type] = {
-                "base": self.load_texture(f"textures/{u_type}.png"),
-                "f": self.load_texture(f"textures/{u_type}f.png"),
-                "b": self.load_texture(f"textures/{u_type}b.png"),
-                "1": self.load_texture(f"textures/{u_type}b.png"),
-                "2": self.load_texture(f"textures/{u_type}b.png")
-            }
+                    self.textures[u_type] = {
+                        "base": self.load_texture(f"textures/{u_type}.png"),
+                        "anim1": self.load_texture(f"textures/{u_type}1.png"),
+                        "anim2": self.load_texture(f"textures/{u_type}2.png")
+                    }
+
 
     def load_texture(self, path):
         if os.path.exists(path):
