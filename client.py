@@ -150,7 +150,9 @@ class ClientApp:
                     self.textures[u_type] = {
                         "base": self.load_texture(f"textures/{u_type}.png"),
                         "anim1": self.load_texture(f"textures/{u_type}1.png"),
-                        "anim2": self.load_texture(f"textures/{u_type}2.png")
+                        "anim2": self.load_texture(f"textures/{u_type}2.png"),
+                        "animf1": self.load_texture(f"textures/{u_type}f1.png"),
+                        "animf2": self.load_texture(f"textures/{u_type}f2.png")
                     }
 
 
@@ -941,21 +943,35 @@ class ClientApp:
             current_img = None
 
             if unit_tex:
-                if u.get("is_moving", False):
-                    # 4-step cycle: 0 -> 1 -> 2 -> 3
-                    anim_step = (self.anim_tick // 15) % 4
-                    if anim_step == 0:
-                        current_img = unit_tex.get("anim1")
-                    elif anim_step in (1, 3):
-                        current_img = unit_tex.get("base")
-                    elif anim_step == 2:
-                        current_img = unit_tex.get("anim2")
+                if u["type"] == "Catapult":
+                    time_since_fire = time.time() - u.get("last_attack", 0)
 
-                    # Fallback in case a specific animation frame is missing
-                    if current_img is None:
-                        current_img = unit_tex.get("base")
+                    if time_since_fire < 0.15:
+                        current_img = unit_tex.get("animf1")
+                    elif time_since_fire < 0.9:
+                        current_img = unit_tex.get("animf2")
+                    elif time_since_fire < 1.5:
+                        current_img = unit_tex.get("animf1")
+                    else:
+                        if u.get("is_moving", False):
+                            anim_step = (self.anim_tick // 15) % 4
+                            current_img = unit_tex.get("anim1") if anim_step == 0 else (unit_tex.get("anim2") if anim_step == 2 else unit_tex.get("base"))
+                        else:
+                            current_img = unit_tex.get("base")
                 else:
-                    current_img = unit_tex.get("base")
+                    if u.get("is_moving", False):
+                        anim_step = (self.anim_tick // 15) % 4
+                        if anim_step == 0:
+                            current_img = unit_tex.get("anim1")
+                        elif anim_step in (1, 3):
+                            current_img = unit_tex.get("base")
+                        elif anim_step == 2:
+                            current_img = unit_tex.get("anim2")
+
+                        if current_img is None:
+                            current_img = unit_tex.get("base")
+                    else:
+                        current_img = unit_tex.get("base")
 
             if current_img:
                 if u["type"] == ("Catapult"):

@@ -725,7 +725,7 @@ class Server:
             if self.water_enabled and self.water_rising_enabled:
                 self.water_level += 0.0001
 
-            now = time.time()
+
 
             for _ in range(3):
                 for i in range(len(self.units)):
@@ -875,20 +875,25 @@ class Server:
 
                 if dist > 3:
                     desired_angle = math.atan2(dy, dx)
-                    # Smoothly interpolate angle toward movement direction
-                    turn_speed = 0.12 if u["type"] == "Catapult" else 0.5
+                    if u["type"] == "Catapult" and time.time() - u.get("last_attack", 0) < 2.5:
+                        u["is_moving"] = False
+                        u["vx"] = 0.0
+                        u["vy"] = 0.0
+                        continue
+
+                    turn_speed = 0.25 if u["type"] == "Catapult" else 0.5
                     u["angle"] = lerp_angle(u["angle"], desired_angle, turn_speed)
 
-                    # Restrict catapult movement until it points toward its waypoint
                     if u["type"] == "Catapult":
                         angle_diff = abs((desired_angle - u["angle"] + math.pi) % (2 * math.pi) - math.pi)
-                        if angle_diff > 0.15:
-                            u["is_moving"] = False
-                            u["vx"] = 0.0
-                            u["vy"] = 0.0
-                            continue
+                        if angle_diff > 0.5:
+                            u["is_moving"] = True
+                            u["vx"] *= 0.5
+                            u["vy"] *= 0.5
+                                                # Allow slow forward crawl while turning instead of hard stopping
 
                     u["is_moving"] = True
+
                     tile_pixel_size = 800.0 / self.board_size
                     base_blocks_per_second = u.get("group_speed") if u.get("group_speed") is not None else get_unit_base_speed(u["type"])
                     speed = base_blocks_per_second * tile_pixel_size * 0.1
@@ -1004,6 +1009,7 @@ class Server:
                             u["angle"] = lerp_angle(u["angle"], base_ang, 0.001)
 
                             # Fire only when aligned
+                            now = time.time()
                             if abs((base_ang - u["angle"] + math.pi) % (2 * math.pi) - math.pi) < 0.15 and now - u["last_attack"] > 2.0:
                                 u["last_attack"] = now
                                 self.projectiles.append({
