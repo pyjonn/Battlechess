@@ -892,8 +892,17 @@ class ClientApp:
                 p_type = p.get("type") or p.get("unit_type", "Catapult")
                 p_tex = self.projectile_textures.get(p_type)
 
+                # Calculate scale factor for board-relative sizing
+                scale = self.zoom * (500.0 / WORLD_SIZE)
+                tile_world_size = WORLD_SIZE / float(self.board_size)
+
                 if p_tex:
-                    proj_size = max(8, int(12 * self.zoom))
+                    if p_type == "Catapult":
+                        proj_world_size = tile_world_size * 0.9
+                        proj_size = max(8, int(proj_world_size * scale))
+                    else:
+                        proj_size = max(8, int(12 * self.zoom))
+
                     scaled_proj = pygame.transform.scale(p_tex, (proj_size, proj_size))
                     angle = p.get("angle", 0.0)
                     s_angle = self.to_screen_angle(angle)
@@ -902,8 +911,8 @@ class ClientApp:
                     SCREEN.blit(rotated_proj, rect.topleft)
                 else:
                     if p_type == "Catapult":
-                        # Distinct boulder fallback if texture isn't loaded
-                        boulder_radius = max(4, int(6 * self.zoom))
+                        boulder_world_radius = tile_world_size * 0.4
+                        boulder_radius = max(4, int(boulder_world_radius * scale))
                         pygame.draw.circle(SCREEN, (120, 120, 120), (int(sx), int(sy)), boulder_radius)
                         pygame.draw.circle(SCREEN, (60, 60, 60), (int(sx), int(sy)), boulder_radius, 1)
                     else:
