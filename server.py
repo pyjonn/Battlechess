@@ -873,7 +873,11 @@ class Server:
                 dy = u["target_y"] - u["y"]
                 dist = math.hypot(dx, dy)
 
-                if dist > 3:
+                stop_distance = 3.0
+                if target and u.get("target_unit"):
+                    stop_distance = u["radius"] + target["radius"] + 2.0
+
+                if dist > stop_distance:
                     desired_angle = math.atan2(dy, dx)
                     if u["type"] == "Catapult" and time.time() - u.get("last_attack", 0) < 2.5:
                         u["is_moving"] = False
@@ -953,11 +957,13 @@ class Server:
                     can_see = not self.fog_enabled or has_cone_vision(u, target["x"], target["y"])
                     in_front = is_in_front_arc(u, target["x"], target["y"])
 
+                    # Define 'now' here so every unit type can access it
+                    now = time.time()
+
                     if u["type"] == "Archer":
                         archer_range = u["radius"] * 18.0
                         projectile_speed = u["radius"] * 0.05
                         projectile_life = max(1, int(archer_range / projectile_speed))
-
                         if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
                             u["angle"] = lerp_angle(u["angle"], base_ang, 0.1)
