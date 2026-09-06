@@ -962,7 +962,7 @@ class Server:
 
                     if u["type"] == "Archer":
                         archer_range = u["radius"] * 18.0
-                        projectile_speed = u["radius"] * 0.05
+                        projectile_speed = u["radius"] * 0.3
                         projectile_life = max(1, int(archer_range / projectile_speed))
                         if not u["is_moving"] and e_dist < archer_range and can_see and in_front and now - u["last_attack"] > 1.2:
                             base_ang = math.atan2(target["y"] - u["y"], target["x"] - u["x"])
@@ -976,7 +976,7 @@ class Server:
                                 dmg_mult = max(0.3, min(2.0, 1.0 - (h_diff * 0.4)))
 
                                 archer_range = u["radius"] * 18.0
-                                projectile_speed = u["radius"] * 0.05
+                                projectile_speed = u["radius"] * 0.45
                                 projectile_life = max(1, int(archer_range / projectile_speed))
 
                                 vx = math.cos(base_ang) * projectile_speed
