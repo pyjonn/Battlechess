@@ -749,10 +749,29 @@ class Server:
                             ratio1 = w2 / total_weight
                             ratio2 = w1 / total_weight
 
+                            # Existing collision resolution
                             u1["x"] -= nx * (overlap * ratio1)
                             u1["y"] -= ny * (overlap * ratio1)
                             u2["x"] += nx * (overlap * ratio2)
                             u2["y"] += ny * (overlap * ratio2)
+
+                            # New dynamic trample damage
+                            if self.is_enemy(u1["owner"], u2["owner"]):
+                                # Check if u1 is a Rider trampling u2
+                                if u1["type"] == "Rider":
+                                    speed1 = math.hypot(u1.get("vx", 0.0), u1.get("vy", 0.0))
+                                    if speed1 > 0.5:  # Minimum momentum required
+                                        damage = speed1 * (u1["radius"] * 0.005)
+                                        u2["hp"] -= damage
+                                        u2["is_hit"] = True
+
+                                # Check if u2 is a Rider trampling u1
+                                if u2["type"] == "Rider":
+                                    speed2 = math.hypot(u2.get("vx", 0.0), u2.get("vy", 0.0))
+                                    if speed2 > 0.5:
+                                        damage = speed2 * (u2["radius"] * 0.01)
+                                        u1["hp"] -= damage
+                                        u1["is_hit"] = True
 
             for u in self.units:
                 u["is_hit"] = False
