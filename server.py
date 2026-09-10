@@ -405,6 +405,13 @@ class Server:
             sender_name = self.usernames.get(pid, f"Player {pid + 1}")
             self.broadcast({"type": "CHAT", "sender": sender_name, "text": msg["text"]})
 
+        elif mtype == "SET_STANCE" and self.state == "IN_GAME":
+                    u_ids = msg.get("unit_ids", [])
+                    stance = msg.get("stance", "normal")
+                    for u in self.units:
+                        if u["owner"] == pid and u["id"] in u_ids:
+                            u["stance"] = stance
+
         elif mtype == "SELL_UNIT" and self.state == "SHOP":
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
@@ -870,8 +877,17 @@ class Server:
                     # Replace the duplicated blocks with this:
                     if not target and u["type"] != "Medic":
                         enemies = [e for e in self.units if self.is_enemy(e["owner"], u["owner"])]
-                        scan_range = u["radius"] * 18.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 6.0
-                        leash_range = u["radius"] * 20.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 7.0
+
+                        stance = u.get("stance", "normal")
+                        if stance == "sentry":
+                            scan_range = u["radius"] * 15.0
+                            leash_range = u["radius"] * 3
+                        elif stance == "chase":
+                            scan_range = u["radius"] * 15.0
+                            leash_range = u["radius"] * 50.0
+                        else:
+                            scan_range = u["radius"] * 18.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 6.0
+                            leash_range = u["radius"] * 20.0 if u["type"] in ("Archer", "Catapult") else u["radius"] * 7.0
 
                         closest_enemy = find_nearest_enemy_in_path(u, enemies, scan_radius=scan_range, max_leash=leash_range)
                         if closest_enemy:

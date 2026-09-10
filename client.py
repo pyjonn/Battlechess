@@ -616,6 +616,18 @@ class ClientApp:
         if event.type == pygame.MOUSEBUTTONDOWN:
             smx, smy = event.pos
             if event.button == 1:
+                if smx <= 250:
+                    btn_y = HEIGHT - 140
+                    stances = [("sentry", 0), ("normal", 1), ("chase", 2)]
+                    for val, i in stances:
+                        if pygame.Rect(20, btn_y + i * 40, 210, 30).collidepoint(smx, smy):
+                            if self.selected_units:
+                                self.send({"type": "SET_STANCE", "unit_ids": list(self.selected_units), "stance": val})
+                                # Instantly update local units to reflect the new shared stance
+                                for u in self.units:
+                                    if u["id"] in self.selected_units:
+                                        u["stance"] = val
+                            return
                 if smx > 250 and smy > 40:
                     self.drag_start = (smx, smy)
 
@@ -638,7 +650,7 @@ class ClientApp:
                             for u in self.units:
                                 if u["owner"] == self.player_id and u["type"] == clicked_unit["type"]:
                                     self.selected_units.add(u["id"])
-
+                                    self.current_stance = u.get("stance", "normal")
                             # Add this line to prevent MOUSEBUTTONUP from clearing the selection
                             self.drag_start = None
 
@@ -686,6 +698,7 @@ class ClientApp:
                                     u_radius_world = (u_blocks / self.board_size) * WORLD_SIZE * 0.5
                                     if math.hypot(u["x"] - wmx, u["y"] - wmy) < (u_radius_world + 8 / self.zoom):
                                         self.selected_units.add(u["id"])
+                                        self.current_stance = u.get("stance", "normal")
                         else:
                             if not is_shift:
                                 self.selected_units.clear()
@@ -698,6 +711,7 @@ class ClientApp:
                                     usx, usy = self.to_screen_coords(u["x"], u["y"])
                                     if select_rect.collidepoint(usx, usy):
                                         self.selected_units.add(u["id"])
+                                        self.current_stance = u.get("stance", "normal")
 
     def handle_common_board_events(self, event):
         if event.type == pygame.KEYDOWN:
@@ -1203,6 +1217,20 @@ class ClientApp:
         self.draw_board()
         self.draw_units_and_projectiles()
         self.draw_minimap()
+
+        if self.game_state == "IN_GAME":
+            btn_y = HEIGHT - 140
+            stances = [("Sentry (Hold Position)", "sentry"), ("Normal (Auto Attack)", "normal"), ("Chase (Long Leash)", "chase")]
+
+            # Calculate all unique stances currently active among selected units
+            active_stances = {u.get("stance", "normal") for u in self.units if u["id"] in self.selected_units}
+
+            for i, (label, val) in enumerate(stances):
+                rect = pygame.Rect(20, btn_y + i * 40, 210, 30)
+                # Highlight the button if its stance is in the active set
+                color = (80, 120, 80) if val in active_stances else (50, 50, 65)
+                pygame.draw.rect(SCREEN, color, rect, border_radius=4)
+                SCREEN.blit(FONT.render(label, True, (255, 255, 255)), (rect.x + 10, rect.y + 7))
 
         if self.drag_start:
             mx, my = pygame.mouse.get_pos()
