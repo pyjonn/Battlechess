@@ -370,6 +370,8 @@ class ClientApp:
                 self.water_rising = msg["water_rising"]
             if "heightmap" in msg:
                 self.heightmap = msg["heightmap"]
+            if "match_type" in msg:
+                self.match_type = msg["match_type"]
         elif mtype == "SHOP_START":
             self.game_state = "SHOP"
             self.board_size = msg["board_size"]
@@ -536,7 +538,36 @@ class ClientApp:
         SCREEN.blit(jbt, (WIDTH // 2 - jbt.get_width() // 2, 366))
 
     def handle_lobby_events(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            mx, my = event.pos
+            if event.button == 1: # Left click
+                if pygame.Rect(40, 540, 870, 35).collidepoint(mx, my):
+                    self.chat_active = True
+                else:
+                    self.chat_active = False
+
+                if self.player_id == self.host_id:
+                    if pygame.Rect(40, 65, 145, 25).collidepoint(mx, my):
+                        self.send({"type": "TOGGLE_MATCH"})
+                    elif pygame.Rect(195, 65, 95, 25).collidepoint(mx, my):
+                        self.send({"type": "TOGGLE_MODE"})
+                    elif pygame.Rect(300, 65, 115, 25).collidepoint(mx, my):
+                        if mx < 330: # Left arrow zone
+                            self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
+                        elif mx > 385: # Right arrow zone
+                            self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
+                    elif pygame.Rect(425, 65, 125, 25).collidepoint(mx, my):
+                        if mx < 455: # Left arrow zone
+                            self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
+                        elif mx > 515: # Right arrow zone
+                            self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(10000, self.starting_gold + 100)})
+                    elif pygame.Rect(560, 65, 120, 25).collidepoint(mx, my):
+                        self.send({"type": "SET_WATER_RISING", "rising": not self.water_rising})
+                    elif pygame.Rect(690, 65, 100, 25).collidepoint(mx, my):
+                        self.send({"type": "TOGGLE_FOG"})
+
+
+        # ... retain existing KEYDOWN logic for typing in chat and SPACE to start
             if pygame.Rect(40, 540, 870, 35).collidepoint(event.pos):
                 self.chat_active = True
             else:
@@ -1153,8 +1184,26 @@ class ClientApp:
 
         pygame.draw.rect(SCREEN, (30, 30, 35), (40, 65, 870, 25))
 
-        settings_txt = FONT.render(f"Mode: {self.game_mode} (M) | Size: {self.board_size} (UP/DN) | Gold: ${self.starting_gold} (L/R) | Water: {self.water_rising} (W) | Fog: {self.fog_enabled} (F)", True, (200, 220, 100))
-        SCREEN.blit(settings_txt, (40, 65))
+        settings = [
+            ("Match: " + getattr(self, 'match_type', 'skirmish').capitalize(), pygame.Rect(40, 65, 145, 25)),
+            ("Mode: " + self.game_mode, pygame.Rect(195, 65, 95, 25)),
+            ("Size: " + str(self.board_size), pygame.Rect(300, 65, 115, 25)),
+            ("Gold: $" + str(self.starting_gold), pygame.Rect(425, 65, 125, 25)),
+            ("Water: " + str(self.water_rising), pygame.Rect(560, 65, 120, 25)),
+            ("Fog: " + str(self.fog_enabled), pygame.Rect(690, 65, 100, 25))
+        ]
+
+        is_host = (self.player_id == self.host_id)
+        for text, rect in settings:
+            color = (80, 120, 80) if is_host else (50, 50, 65)
+            pygame.draw.rect(SCREEN, color, rect, border_radius=4)
+
+            if text.startswith("Size:") or text.startswith("Gold:"):
+                SCREEN.blit(FONT.render("<", True, (255, 255, 255)), (rect.x + 5, rect.y + 4))
+                SCREEN.blit(FONT.render(">", True, (255, 255, 255)), (rect.right - 15, rect.y + 4))
+                SCREEN.blit(FONT.render(text, True, (255, 255, 255)), (rect.x + 20, rect.y + 4))
+            else:
+                SCREEN.blit(FONT.render(text, True, (255, 255, 255)), (rect.x + 5, rect.y + 4))
 
         is_host = (self.player_id == self.host_id)
         host_status_str = "Press SPACE to Start (Host Only)" if is_host else "Waiting for Host to start..."

@@ -482,7 +482,12 @@ class Server:
         elif mtype == "TOGGLE_MODE" and pid == self.host_id and self.state == "LOBBY":
             self.game_mode = "2v2" if self.game_mode == "FFA" else "FFA"
             self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode, "win_condition": self.win_condition, "target_score": self.target_score, "fog_enabled": self.fog_enabled})
-
+        elif mtype == "TOGGLE_MATCH" and pid == self.host_id and self.state == "LOBBY":
+                    self.match_type = "campaign" if getattr(self, 'match_type', 'skirmish') == "skirmish" else "skirmish"
+                    self.broadcast({
+                        "type": "SETTINGS_UPDATE",
+                        "match_type": self.match_type
+                    })
         elif mtype == "START_GAME" and pid == self.host_id and self.state == "LOBBY":
             logging.info("Host started the game. Transitioning to SHOP phase.")
             self.state = "SHOP"
