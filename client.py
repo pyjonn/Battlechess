@@ -82,7 +82,7 @@ FONT_CUSTOM = pygame.font.SysFont("Arial", 12, bold=True)
 SHOP_ITEMS = [
     ("Peasant", 100),
     ("Archer", 150),
-    ("Rider", 140),
+    ("Rider", 220),
     ("Medic", 180),
     ("Shieldman", 120),
     ("Catapult", 300),

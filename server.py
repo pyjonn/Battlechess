@@ -409,7 +409,7 @@ class Server:
             uid = msg.get("unit_id")
             for i, u in enumerate(self.units):
                 if u["id"] == uid and u["owner"] == pid and u["type"] != "King":
-                    costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
+                    costs = {"Peasant": 100, "Archer": 150, "Rider": 220, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
                     self.gold[pid] += costs.get(u["type"], 0)
                     self.units.pop(i)
 
@@ -553,7 +553,7 @@ class Server:
             })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
-            costs = {"Peasant": 100, "Archer": 150, "Rider": 140, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
+            costs = {"Peasant": 100, "Archer": 150, "Rider": 220, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
             utype = msg["unit_type"]
             cost = costs.get(utype, 100)
 
@@ -756,23 +756,33 @@ class Server:
                             u2["y"] += ny * (overlap * ratio2)
 
                             # New dynamic trample damage
+                            # New dynamic trample damage with momentum loss
                             if self.is_enemy(u1["owner"], u2["owner"]):
                                 # Check if u1 is a Rider trampling u2
                                 if u1["type"] == "Rider":
                                     speed1 = math.hypot(u1.get("vx", 0.0), u1.get("vy", 0.0))
-                                    if speed1 > 0.5:  # Minimum momentum required
-                                        damage = speed1 * (u1["radius"] * 0.005)
+                                    if speed1 > 3:
+                                        # Deal kinetic damage
+                                        damage = speed1 * (u1["radius"] * 0.06)
                                         u2["hp"] -= damage
                                         u2["is_hit"] = True
+
+                                        # Momentum loss upon impact (slow down by 60%)
+                                        u1["vx"] *= -0.1
+                                        u1["vy"] *= -0.1
 
                                 # Check if u2 is a Rider trampling u1
                                 if u2["type"] == "Rider":
                                     speed2 = math.hypot(u2.get("vx", 0.0), u2.get("vy", 0.0))
-                                    if speed2 > 0.5:
-                                        damage = speed2 * (u2["radius"] * 0.01)
+                                    if speed2 > 3:
+                                        # Deal kinetic damage
+                                        damage = speed2 * (u2["radius"] * 0.06)
                                         u1["hp"] -= damage
                                         u1["is_hit"] = True
 
+                                        # Momentum loss upon impact (slow down by 60%)
+                                        u2["vx"] *= -0.1
+                                        u2["vy"] *= -0.1
             for u in self.units:
                 u["is_hit"] = False
                 target = None
