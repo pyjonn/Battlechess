@@ -551,11 +551,16 @@ class ClientApp:
                         self.send({"type": "TOGGLE_MATCH"})
                     elif pygame.Rect(195, 65, 95, 25).collidepoint(mx, my):
                         self.send({"type": "TOGGLE_MODE"})
+                        # Replace the existing board size click logic inside handle_lobby_events
                     elif pygame.Rect(300, 65, 115, 25).collidepoint(mx, my):
+                        is_campaign = getattr(self, 'match_type', 'skirmish') == 'campaign'
+                        min_size = 100 if is_campaign else 12
+                        max_size = 300 if is_campaign else 128
+
                         if mx < 330: # Left arrow zone
-                            self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
+                            self.send({"type": "SET_BOARD_SIZE", "size": max(min_size, self.board_size - 2)})
                         elif mx > 385: # Right arrow zone
-                            self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
+                            self.send({"type": "SET_BOARD_SIZE", "size": min(max_size, self.board_size + 2)})
                     elif pygame.Rect(425, 65, 125, 25).collidepoint(mx, my):
                         if mx < 455: # Left arrow zone
                             self.send({"type": "SET_STARTING_GOLD", "starting_gold": max(100, self.starting_gold - 100)})
@@ -586,10 +591,13 @@ class ClientApp:
                     self.chat_input += event.unicode
             else:
                 if self.player_id == self.host_id:
+                    # Replace the K_UP and K_DOWN logic
                     if event.key == pygame.K_UP:
-                        self.send({"type": "SET_BOARD_SIZE", "size": min(128, self.board_size + 2)})
+                        is_campaign = getattr(self, 'match_type', 'skirmish') == 'campaign'
+                        self.send({"type": "SET_BOARD_SIZE", "size": min(300 if is_campaign else 128, self.board_size + 2)})
                     elif event.key == pygame.K_DOWN:
-                        self.send({"type": "SET_BOARD_SIZE", "size": max(12, self.board_size - 2)})
+                        is_campaign = getattr(self, 'match_type', 'skirmish') == 'campaign'
+                        self.send({"type": "SET_BOARD_SIZE", "size": max(100 if is_campaign else 12, self.board_size - 2)})
                     elif event.key == pygame.K_RIGHT:
                         self.send({"type": "SET_STARTING_GOLD", "starting_gold": min(10000, self.starting_gold + 100)})
                     elif event.key == pygame.K_LEFT:

@@ -241,14 +241,16 @@ def lerp_angle(current, target, max_delta):
     return target
 
 def get_unit_base_speed(unit_type):
-    if unit_type == "Rider":
+    if unit_type == "House":
+        return 0.0  # <-- Prevents the house from calculating movement speed
+    elif unit_type == "Rider":
         return 3.2
     elif unit_type == "King":
         return 1.4
     elif unit_type in ("Knight", "Shieldman"):
         return 1.0
     elif unit_type == "Catapult":
-        return 0.9  # Adjusted walking/movement speed for the catapult
+        return 0.9
     return 2.2
 
 class Server:
@@ -466,10 +468,13 @@ class Server:
             })
 
         elif mtype == "SET_BOARD_SIZE" and pid == self.host_id and self.state == "LOBBY":
-            self.board_size = max(12, min(128, msg["size"]))
+            is_campaign = getattr(self, 'match_type', 'skirmish') == 'campaign'
+            min_size = 100 if is_campaign else 12
+            max_size = 300 if is_campaign else 128
+
+            self.board_size = max(min_size, min(max_size, msg["size"]))
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
             self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
-
         elif mtype == "SET_WATER_RISING" and pid == self.host_id and self.state == "LOBBY":
             self.water_rising_enabled = msg["rising"]
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
@@ -484,13 +489,20 @@ class Server:
             self.broadcast({"type": "SETTINGS_UPDATE", "game_mode": self.game_mode, "win_condition": self.win_condition, "target_score": self.target_score, "fog_enabled": self.fog_enabled})
         elif mtype == "TOGGLE_MATCH" and pid == self.host_id and self.state == "LOBBY":
                     self.match_type = "campaign" if getattr(self, 'match_type', 'skirmish') == "skirmish" else "skirmish"
+
+                    if self.match_type == "campaign":
+                        self.board_size = 100
+                        self.heightmap = generate_heightmap(self.board_size, self.water_enabled, water_rising=self.water_rising_enabled)
+                        self.broadcast({"type": "BOARD_SIZE", "size": self.board_size, "heightmap": self.heightmap})
+
                     self.broadcast({
                         "type": "SETTINGS_UPDATE",
                         "match_type": self.match_type
                     })
         elif mtype == "START_GAME" and pid == self.host_id and self.state == "LOBBY":
-            logging.info("Host started the game. Transitioning to SHOP phase.")
-            self.state = "SHOP"
+            is_campaign = getattr(self, 'match_type', 'skirmish') == 'campaign'
+            logging.info(f"Host started the game. Transitioning to {'IN_GAME' if is_campaign else 'SHOP'} phase.")
+            self.state = "IN_GAME" if is_campaign else "SHOP"
             self.water_level = -0.1 if self.water_enabled else -99.0
             self.units = []
             self.kills = {i: 0 for i in range(4)}
@@ -507,62 +519,74 @@ class Server:
             connected_players = list(self.clients.keys())
             for p in connected_players:
                 kx, ky, kang = king_positions.get(p, (400, 400, 0.0))
-                self.units.append({
-                    "id": self.next_unit_id,
-                    "owner": p,
-                    "type": "King",
-                    "shape": "octagon",
-                    "x": kx,
-                    "y": ky,
-                    "target_x": kx,
-                    "target_y": ky,
-                    "guard_x": kx,
-                    "guard_y": ky,
-                    "waypoints": [],
-                    "hp": 300,
-                    "max_hp": 300,
-                    "angle": kang,
-                    "is_moving": False,
-                    "is_hit": False,
-                    "last_attack": 0,
-                    "target_unit": None,
-                    "draw_radius": int(tile_pixel_size * 1.5),
-                    "radius": four_block_radius,
-                    "vx": 0.0,
-                    "vy": 0.0,
-                    "group_speed": None
-                })
-                self.next_unit_id += 1
+                # ... (Keep existing King appending logic here) ...
+
+                if is_campaign:
+                    self.units.append({
+                        "id": self.next_unit_id,
+                        "owner": p,
+                        "type": "House",
+                        "shape": "square",
+                        "x": kx + 35,
+                        "y": ky + 35,
+                        "target_x": kx + 35,
+                        "target_y": ky + 35,
+                        "guard_x": kx + 35,
+                        "guard_y": ky + 35,
+                        "waypoints": [],
+                        "hp": 500,
+                        "max_hp": 500,
+                        "angle": 0.0,
+                        "is_moving": False,
+                        "is_hit": False,
+                        "last_spawn": time.time(),
+                        "draw_radius": int(tile_pixel_size * 2.0),
+                        "radius": int(tile_pixel_size * 2.0),
+                        "vx": 0.0,
+                        "vy": 0.0,
+                        "group_speed": None
+                    })
+                    self.next_unit_id += 1
 
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units, water_rising=self.water_rising_enabled)
             self.gold = {}
 
-            if self.game_mode == "2v2":
-                team_counts = {
-                    0: sum(1 for p in connected_players if p % 2 == 0),
-                    1: sum(1 for p in connected_players if p % 2 == 1)
-                }
-                for p in connected_players:
-                    my_team = p % 2
-                    opp_team = 1 - my_team
-                    if team_counts[my_team] == 1 and team_counts[opp_team] == 2:
-                        self.gold[p] = int(self.starting_gold * 2.0)
-                    else:
-                        self.gold[p] = self.starting_gold
+            if is_campaign:
+                self.broadcast({
+                    "type": "GAME_START",
+                    "units": self.units,
+                    "board_size": self.board_size,
+                    "heightmap": self.heightmap,
+                    "water_level": self.water_level,
+                    "kills": self.kills
+                })
             else:
-                for p in connected_players:
-                    self.gold[p] = self.starting_gold
-            self.ready = {p: False for p in connected_players}
+                if self.game_mode == "2v2":
+                    team_counts = {
+                        0: sum(1 for p in connected_players if p % 2 == 0),
+                        1: sum(1 for p in connected_players if p % 2 == 1)
+                    }
+                    for p in connected_players:
+                        my_team = p % 2
+                        opp_team = 1 - my_team
+                        if team_counts[my_team] == 1 and team_counts[opp_team] == 2:
+                            self.gold[p] = int(self.starting_gold * 2.0)
+                        else:
+                            self.gold[p] = self.starting_gold
+                else:
+                    for p in connected_players:
+                        self.gold[p] = self.starting_gold
+                self.ready = {p: False for p in connected_players}
 
-            self.broadcast({
-                "type": "SHOP_START",
-                "board_size": self.board_size,
-                "heightmap": self.heightmap,
-                "water_level": self.water_level,
-                "units": self.units,
-                "gold": self.gold,
-                "kills": self.kills
-            })
+                self.broadcast({
+                    "type": "SHOP_START",
+                    "board_size": self.board_size,
+                    "heightmap": self.heightmap,
+                    "water_level": self.water_level,
+                    "units": self.units,
+                    "gold": self.gold,
+                    "kills": self.kills
+                })
 
         elif mtype == "BUY_UNIT" and self.state == "SHOP":
             costs = {"Peasant": 100, "Archer": 150, "Rider": 220, "Medic": 180, "Shieldman": 120, "Knight": 250, "Catapult": 300}
@@ -615,25 +639,25 @@ class Server:
 
                 self.units.append({
                     "id": self.next_unit_id,
-                    "owner": pid,
-                    "type": utype,
-                    "shape": shapes[utype],
-                    "x": sPeasant_x,
-                    "y": sPeasant_y,
-                    "target_x": sPeasant_x,
-                    "target_y": sPeasant_y,
-                    "guard_x": sPeasant_x,
-                    "guard_y": sPeasant_y,
+                    "owner": p,
+                    "type": "House",
+                    "shape": "square",
+                    "x": kx + 35,
+                    "y": ky + 35,
+                    "target_x": kx + 35,
+                    "target_y": ky + 35,
+                    "guard_x": kx + 35,
+                    "guard_y": ky + 35,
                     "waypoints": [],
-                    "hp": max_hps[utype],
-                    "max_hp": max_hps[utype],
+                    "hp": 500,
+                    "max_hp": 500,
                     "angle": 0.0,
                     "is_moving": False,
                     "is_hit": False,
-                    "last_attack": 0,
-                    "target_unit": None,
-                    "draw_radius": draw_radii[utype],
-                    "radius": four_block_radius,
+                    "last_spawn": time.time(),
+                    "last_attack": 0,  # <-- Added missing key
+                    "draw_radius": int(tile_pixel_size * 2.0),
+                    "radius": int(tile_pixel_size * 2.0),
                     "vx": 0.0,
                     "vy": 0.0,
                     "group_speed": None
@@ -667,8 +691,9 @@ class Server:
             tx, ty = msg["target_pos"]
             t_unit = msg.get("target_unit")
             append_path = msg.get("append_path", False)
-            selected_group = [u for u in self.units if u["owner"] == pid and u["id"] in u_ids]
 
+            # <-- Filter out "House" so it cannot receive movement waypoints
+            selected_group = [u for u in self.units if u["owner"] == pid and u["id"] in u_ids and u["type"] != "House"]
             if selected_group:
                 center_x = sum(u["x"] for u in selected_group) / len(selected_group)
                 center_y = sum(u["y"] for u in selected_group) / len(selected_group)
@@ -735,7 +760,36 @@ class Server:
                 continue
 
             if self.water_enabled and self.water_rising_enabled:
-                self.water_level += 0.0001
+                    self.water_level += 0.0001
+
+            new_units = []
+            current_time = time.time()
+            for u in self.units:
+                if u["type"] == "House":
+                    if current_time - u.get("last_spawn", 0) > 6.0: # Spawns a Peasant every 6 seconds
+                        u["last_spawn"] = current_time
+                        tile_pixel_size = 800.0 / self.board_size
+                        new_units.append({
+                            "id": self.next_unit_id,
+                            "owner": u["owner"],
+                            "type": "Peasant",
+                            "shape": "circle",
+                            "x": u["x"] + 15,
+                            "y": u["y"] + 15,
+                            "target_x": u["x"] + 15, "target_y": u["y"] + 15,
+                            "guard_x": u["x"] + 15, "guard_y": u["y"] + 15,
+                            "waypoints": [],
+                            "hp": 70, "max_hp": 70,
+                            "angle": 0.0, "is_moving": False, "is_hit": False,
+                            "last_attack": 0,
+                            "draw_radius": int(tile_pixel_size * 1.2),
+                            "radius": (int(2.0 * tile_pixel_size) / 2) * 0.9,
+                            "vx": 0.0, "vy": 0.0, "group_speed": None
+                        })
+                        self.next_unit_id += 1
+
+            if new_units:
+                self.units.extend(new_units)
 
 
 
