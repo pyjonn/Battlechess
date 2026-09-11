@@ -935,6 +935,10 @@ class ClientApp:
                     end_x, end_y = path_points[-1]
                     pygame.draw.circle(SCREEN, line_color, (int(end_x), int(end_y)), 4, 1)
 
+        for u in self.units + getattr(self, "buildings", []):
+            if self.game_state == "SHOP" and u["owner"] != self.player_id and u["type"] != "King":
+                continue
+
         for p in self.particles:
             if self.is_tile_visible(p["x"], p["y"]):
                 sx, sy = self.to_screen_coords(p["x"], p["y"])

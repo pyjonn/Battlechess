@@ -276,6 +276,7 @@ class Server:
 
         self.units = []
         self.projectiles = []
+        self.buildings = []  # Add this line
 
         self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units, water_rising=self.water_rising_enabled)
         self.water_level = -0.1
@@ -519,27 +520,26 @@ class Server:
             connected_players = list(self.clients.keys())
             for p in connected_players:
                 kx, ky, kang = king_positions.get(p, (400, 400, 0.0))
-                # ... (Keep existing King appending logic here) ...
 
-                if is_campaign:
+                if not is_campaign:
                     self.units.append({
                         "id": self.next_unit_id,
                         "owner": p,
-                        "type": "House",
-                        "shape": "square",
-                        "x": kx + 35,
-                        "y": ky + 35,
-                        "target_x": kx + 35,
-                        "target_y": ky + 35,
-                        "guard_x": kx + 35,
-                        "guard_y": ky + 35,
+                        "type": "King",
+                        "shape": "circle",
+                        "x": kx,
+                        "y": ky,
+                        "target_x": kx,
+                        "target_y": ky,
+                        "guard_x": kx,
+                        "guard_y": ky,
                         "waypoints": [],
                         "hp": 500,
                         "max_hp": 500,
-                        "angle": 0.0,
+                        "angle": kang,
                         "is_moving": False,
                         "is_hit": False,
-                        "last_spawn": time.time(),
+                        "last_attack": 0,
                         "draw_radius": int(tile_pixel_size * 2.0),
                         "radius": int(tile_pixel_size * 2.0),
                         "vx": 0.0,
@@ -547,6 +547,28 @@ class Server:
                         "group_speed": None
                     })
                     self.next_unit_id += 1
+
+                elif is_campaign:
+                    hx, hy = kx + 35, ky + 35
+                    terrain_height = get_height_at_pos(hx, hy, self.heightmap, self.board_size)
+
+                    # Enforce skirmish-style water restriction
+                    if terrain_height > self.water_level:
+                        self.buildings.append({
+                            "id": self.next_unit_id,
+                            "owner": p,
+                            "type": "House",
+                            "shape": "square",
+                            "x": hx,
+                            "y": hy,
+                            "hp": 500,
+                            "max_hp": 500,
+                            "angle": 0.0,
+                            "last_spawn": time.time(),
+                            "draw_radius": int(tile_pixel_size * 2.0),
+                            "radius": int(tile_pixel_size * 2.0)
+                        })
+                        self.next_unit_id += 1
 
             self.heightmap = generate_heightmap(self.board_size, self.water_enabled, units=self.units, water_rising=self.water_rising_enabled)
             self.gold = {}
@@ -639,25 +661,25 @@ class Server:
 
                 self.units.append({
                     "id": self.next_unit_id,
-                    "owner": p,
-                    "type": "House",
-                    "shape": "square",
-                    "x": kx + 35,
-                    "y": ky + 35,
-                    "target_x": kx + 35,
-                    "target_y": ky + 35,
-                    "guard_x": kx + 35,
-                    "guard_y": ky + 35,
+                    "owner": pid,
+                    "type": utype,
+                    "shape": shapes.get(utype, "circle"),
+                    "x": sPeasant_x,
+                    "y": sPeasant_y,
+                    "target_x": sPeasant_x,
+                    "target_y": sPeasant_y,
+                    "guard_x": sPeasant_x,
+                    "guard_y": sPeasant_y,
                     "waypoints": [],
-                    "hp": 500,
-                    "max_hp": 500,
+                    "hp": max_hps.get(utype, 100),
+                    "max_hp": max_hps.get(utype, 100),
                     "angle": 0.0,
                     "is_moving": False,
                     "is_hit": False,
                     "last_spawn": time.time(),
-                    "last_attack": 0,  # <-- Added missing key
-                    "draw_radius": int(tile_pixel_size * 2.0),
-                    "radius": int(tile_pixel_size * 2.0),
+                    "last_attack": 0,
+                    "draw_radius": draw_radii.get(utype, int(tile_pixel_size * 1.2)),
+                    "radius": four_block_radius,
                     "vx": 0.0,
                     "vy": 0.0,
                     "group_speed": None
@@ -764,6 +786,10 @@ class Server:
 
             new_units = []
             current_time = time.time()
+            for b in self.buildings:
+                if b["type"] == "House":
+                    if current_time - b.get("last_spawn", 0) > 6.0:
+                        b["last_spawn"] = current_time
             for u in self.units:
                 if u["type"] == "House":
                     if current_time - u.get("last_spawn", 0) > 6.0: # Spawns a Peasant every 6 seconds
